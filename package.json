@@ -2,6 +2,8 @@
   "name": "github-insights-agg",
   "version": "1.0.0",
   "private": true,
+  "description": "Aggregate GitHub repository Insights metrics into a local store, with cross-repo comparisons, trend analysis and rule-based insights.",
+  "license": "MIT",
   "type": "module",
   "engines": {
     "node": ">=22.5"

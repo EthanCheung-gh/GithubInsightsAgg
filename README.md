@@ -1,81 +1,94 @@
 # GithubInsightsAgg
 
-把 GitHub 仓库 Insights 页面里分散的指标（Traffic、提交活跃度、Contributors、Issues、Community）统一采集落库，提供**跨仓库聚合**、**趋势对比**与**规则化中文洞察**的分析平台。
+**English** | [简体中文](README.zh-CN.md)
 
-## 目录
+![license](https://img.shields.io/badge/license-MIT-blue)
+![node](https://img.shields.io/badge/node-%3E%3D22.5-brightgreen)
+![next](https://img.shields.io/badge/Next.js-16.4.6-black)
+![react](https://img.shields.io/badge/React-19.3.1-61dafb)
+![echarts](https://img.shields.io/badge/ECharts-6.1.0-aa344d)
+![tailwind](https://img.shields.io/badge/Tailwind%20CSS-4.3.5-38bdf8)
 
-1. [项目简介](#1-项目简介)
-2. [功能特性](#2-功能特性)
-3. [快速开始](#3-快速开始)
-4. [配置 GitHub Token](#4-配置-github-token)
-5. [脚本](#5-脚本)
-6. [页面导览](#6-页面导览)
+Collect the metrics scattered across GitHub's per-repository Insights pages (traffic, commit activity, contributors, issues, community) into one local store, and analyse them with **cross-repo aggregation**, **trend comparison** and **rule-based insights**.
+
+## Contents
+
+1. [Overview](#1-overview)
+2. [Features](#2-features)
+3. [Quick start](#3-quick-start)
+4. [GitHub token configuration](#4-github-token-configuration)
+5. [Scripts](#5-scripts)
+6. [Pages](#6-pages)
 7. [HTTP API](#7-http-api)
-8. [数据采集矩阵](#8-数据采集矩阵)
-9. [指标口径](#9-指标口径)
-10. [架构说明](#10-架构说明)
-11. [定时采集](#11-定时采集)
-12. [已知限制](#12-已知限制)
-13. [技术栈](#13-技术栈)
+8. [Data collection matrix](#8-data-collection-matrix)
+9. [Metric definitions](#9-metric-definitions)
+10. [Architecture](#10-architecture)
+11. [Scheduled collection](#11-scheduled-collection)
+12. [Known limitations](#12-known-limitations)
+13. [Tech stack](#13-tech-stack)
+14. [License](#license)
 
-## 1. 项目简介
+## 1. Overview
 
-GithubInsightsAgg 是一个**自建、单进程、单用户**的 GitHub 数据聚合分析平台。它解决 GitHub 原生 Insights 的四个关键短板：
+GithubInsightsAgg is a **self-hosted, single-process, single-user** GitHub analytics platform. It closes four gaps in GitHub's native Insights:
 
-- **Traffic 只有 14 天**：GitHub 只保留最近 14 天的 views / clones 明细，稍不留神就永久丢失。本项目每日同步把窗口持续落进本地 SQLite，运行越久历史越完整。
-- **没有跨仓库视图**：原生 Insights 只能一个仓库一个仓库地看，无法比较「哪个仓库值得继续投入」。本项目提供聚合 KPI、排行榜、健康度评分与横向对比页。
-- **没有历史留存**：Stars / Forks / Open Issues 只有当前值。本项目每日写快照，可以算区间增量。
-- **只有裸图表没有结论**：本项目内置规则引擎，直接输出中文洞察与异常提示（如「克隆比例偏高，可能存在自动化同步或镜像」「近 30 天无访问记录」）。
+- **Traffic only lasts 14 days**: GitHub keeps only the last 14 days of views / clones detail, which is lost for good if you do not capture it. This project syncs daily and keeps every window in a local SQLite database, so history gets more complete the longer it runs.
+- **No cross-repo view**: native Insights only shows one repository at a time, so there is no way to compare "which repository is worth further investment". This project provides aggregate KPIs, a leaderboard, health scores and a side-by-side comparison page.
+- **No historical retention**: Stars / Forks / Open Issues are only available as current values. This project writes a daily snapshot, so range deltas can be computed.
+- **Charts without conclusions**: a built-in rule engine emits insights and warnings (for example "clone ratio is high, likely automation or a mirror" or "no traffic in the last 30 days").
 
-数据落在本地 SQLite（`node:sqlite`，零 ORM），页面与 API 由同一个 Next.js 进程提供，无需额外服务。
+Data lives in a local SQLite file (`node:sqlite`, no ORM). Pages and API are served by the same Next.js process, so no extra service is required.
 
-## 2. 功能特性
+**Language note**: the dashboard copy and the generated insights are Simplified Chinese (`src/lib/insights.ts` emits Chinese titles and details). The data model, metric names and JSON API stay language-neutral, so the API is usable from any tooling. The Chinese edition of this document is [`README.zh-CN.md`](README.zh-CN.md).
 
-### Traffic（访问与克隆）
+## 2. Features
 
-- 逐日 `views` / `uniqueVisitors` / `clones` / `uniqueCloners`，支持 7 / 30 / 90 天区间。
-- 来源排行（referrers）与热门页面（paths）。
-- 克隆比例 `cloneRate`：识别镜像站、CI 拉取、自动化同步等异常。
+### Traffic (views and clones)
 
-### 代码活跃度
+- Per-day `views` / `uniqueVisitors` / `clones` / `uniqueCloners`, for 7 / 30 / 90-day windows.
+- Referrer ranking and popular paths.
+- Clone ratio `cloneRate`, to spot mirror sites, CI pulls and automation.
 
-- 逐日提交曲线（来自 GitHub `stats/commit_activity`）。
-- 周参与度：每周 commits / additions / deletions（`stats/participation` + `stats/code_frequency`）。
-- 贡献者 Top N（前 100）与合计提交数。
-- 最忙星期（`busiestWeekday`）与日均提交数（`avgCommitsPerDay`）。
+### Code activity
 
-### Issues / PR 健康度
+- Daily commit curve (from GitHub `stats/commit_activity`).
+- Weekly participation: commits / additions / deletions per week (`stats/participation` + `stats/code_frequency`).
+- Top contributors (the API returns up to 100; the UI lists the top 20) plus the total commit count.
+- Busiest weekday (`busiestWeekday`) and average commits per day (`avgCommitsPerDay`).
 
-- 逐日新开 / 关闭 Issue，新开 / 合并 / 关闭未合并 PR。
-- 关闭率 `closeRate`、合并率 `mergeRate`、疑似积压 `staleOpenIssues`。
-- 用于回答「需求在堆积还是在消化」。
+### Issues / PR health
 
-### 仓库概览与社区健康
+- Per-day opened / closed issues, and opened / merged / closed-without-merge pull requests.
+- Close rate `closeRate`, merge rate `mergeRate`, suspected backlog `staleOpenIssues`.
+- Answers "is demand piling up, or being worked down?".
 
-- Stars / Forks / Watchers / Open Issues 与区间增量 `starDelta`。
-- Stars 等指标的每日快照趋势。
-- 语言构成（按字节占比）。
-- Release 节奏：最近发布列表 + 相邻发布间隔中位数 `releaseCadenceDays`。
-- 社区健康档案：health percentage 与 README / LICENSE / CONTRIBUTING / CODE_OF_CONDUCT / Issue 模板 / PR 模板 / 描述 7 项清单。
+### Repository overview and community health
 
-### 多仓库聚合与对比
+- Stars / Forks / Watchers / Open Issues, plus the range delta `starDelta`.
+- Daily snapshot trend for stars and friends.
+- Language mix (share of bytes).
+- Release cadence: the most recent releases plus the median gap between adjacent releases (`releaseCadenceDays`).
+- Community profile: health percentage and a 7-item checklist (README / LICENSE / CONTRIBUTING / CODE_OF_CONDUCT / issue template / PR template / description).
 
-- 总览页聚合 KPI、按日汇总的趋势曲线、仓库排行榜、语言构成、跨仓洞察。
-- 对比页支持 2~4 个仓库横向对比：指标矩阵、访问量 / 提交数 / 健康度对比图、流量对齐趋势、对比洞察。
+### Multi-repo aggregation and comparison
 
-### 规则化中文洞察
+- Overview page: aggregate KPIs, a daily aggregate trend, a repository leaderboard, language mix and cross-repo insights.
+- Compare page: 2–4 repositories side by side — metric matrix, views / commits / health-score charts, traffic-aligned trend and comparison insights.
 
-- 每个仓库与聚合视图都会生成最多 6 条洞察，按严重程度排序（critical > warn > info > good）。
-- 覆盖：流量环比异动、克隆比例过高、来源集中、提交活跃度下滑、Issue 积压、社区档案缺失、Stars 增长、区间内零流量。
+### Rule-based insights
 
-### 健康度评分
+- Every repository, and the aggregate view, gets at most 6 insights sorted by severity (critical > warn > info > good).
+- Covers: traffic change vs the previous window, clone ratio too high, referrer concentration, falling commit activity, issue backlog, missing community files, star growth, zero traffic in the range.
+- Text is generated in Simplified Chinese; the `level` and `metric` fields are stable, so clients can key off them instead of the prose.
 
-- 0~100 复合评分，由流量、活跃度、响应度、社区健康四部分加权得出，可排序、可对比。
-- 聚合视图的 `overall.healthScore` 按各仓库 `views` 加权平均。
+### Health score
 
-## 3. 快速开始
+- A 0–100 composite of traffic, activity, responsiveness and community health, sortable and comparable.
+- The aggregate view's `overall.healthScore` is the `views`-weighted mean of the per-repo scores.
 
-要求 Node.js >= 22.5（使用内置 `node:sqlite`），并已安装 pnpm。
+## 3. Quick start
+
+Requires Node.js >= 22.5 (for the built-in `node:sqlite`) and pnpm.
 
 ```bash
 pnpm install
@@ -84,136 +97,137 @@ pnpm db:migrate
 pnpm dev        # http://localhost:3000
 ```
 
-启动后打开 <http://localhost:3000>。首次访问会在空库上自动自举演示数据。
+Then open <http://localhost:3000>. On an empty database the first request bootstraps demo data.
 
-**不配置 Token 时会自动进入演示模式**：库里会写入 3 个合成仓库（`demo/aurora-ui`、`demo/nebula-api`、`demo/quanta-cli`），规模分别是大流量高活跃、中等、冷清，因此排行榜、对比页、洞察都有真实可看的形态，界面完全可用。页面顶部的模式徽章会明确标注当前是 `demo` 还是 `live`。
+**Without a token the app runs in demo mode**: three synthetic repositories (`demo/aurora-ui`, `demo/nebula-api`, `demo/quanta-cli`) are written at large / medium / cold scale, so the leaderboard, the compare page and the insights all have realistic shapes and the UI is fully usable. The mode badge in the header states whether you are in `demo` or `live` mode.
 
-演示数据是确定性生成的（同一仓库每次生成完全一致），不依赖网络。
+Demo data is generated deterministically (the same repository always yields the same output) and needs no network access.
 
-注意：如果本机已经用 `gh auth login` 登录过，项目会自动沿用 `gh` 的 Token 进入 `live` 模式，此时**不会**自举演示仓库，需要到 `/repos` 页添加仓库，或执行 `pnpm sync --repo owner/name` 先落一个仓库。
+Note: if you have already run `gh auth login` on this machine, the project picks up that token and runs in `live` mode. Demo repositories are **not** seeded in that case — add a repository on `/repos`, or run `pnpm sync --repo owner/name` to land one first.
 
-## 4. 配置 GitHub Token
+## 4. GitHub token configuration
 
-在 `.env` 里填写：
+Put it in `.env`:
 
 ```bash
 GITHUB_TOKEN="ghp_xxx"
 ```
 
-支持的 Token 类型：
+Supported token types:
 
-- **fine-grained PAT**：选中要采集的仓库，至少给 `Metadata: Read-only`、`Contents: Read-only`、`Issues: Read-only`、`Pull requests: Read-only`；要读 Traffic 还需给 `Administration: Read-only`（Traffic 接口要求对该仓库有 push 权限）。
-- **classic PAT**：勾选 `repo`（含私有仓库）或 `public_repo`（仅公开仓库）。
+- **Fine-grained PAT**: select the repositories to collect; grant at least `Metadata: Read-only`, `Contents: Read-only`, `Issues: Read-only`, `Pull requests: Read-only`. Traffic additionally needs `Administration: Read-only` (the traffic endpoints require push access to that repository).
+- **Classic PAT**: tick `repo` (includes private repositories) or `public_repo` (public repositories only).
 
-其他取值也可用：`GH_TOKEN` 与 `GITHUB_TOKEN` 等价；两者都没有时，会尝试读取本机已登录的 `gh` CLI（`gh auth token`）作为回退。
+`GH_TOKEN` works as well and is equivalent to `GITHUB_TOKEN`; when neither is set, the project tries the locally logged-in `gh` CLI (`gh auth token`) as a fallback.
 
-解析顺序固定为：`GITHUB_TOKEN` → `GH_TOKEN` → `gh auth token` → 演示模式。
+The resolution order is fixed: `GITHUB_TOKEN` → `GH_TOKEN` → `gh auth token` → demo mode.
 
-**Traffic 的平台限制**：GitHub 只允许「对该仓库有 push 权限的 Token」读取 views / clones / referrers / paths。对只有读权限的他人仓库，Traffic 采集会失败，其余指标（提交、贡献者、Issue/PR、语言、Release、社区档案）照常采集，本次同步会被标记为「部分成功」。这不是本项目的缺陷，而是 GitHub 的接口限制。
+**Traffic platform limit**: GitHub only lets a token read views / clones / referrers / paths for repositories that token can push to. For someone else's repository with read-only access, traffic collection fails while every other metric (commits, contributors, issues/PRs, languages, releases, community profile) is collected normally, and the sync run is marked "partial". This is a GitHub API limitation, not a defect of this project.
 
-采集节流可调：`GITHUB_MIN_INTERVAL_MS`（默认 80ms）。
+Collection throttling is configurable: `GITHUB_MIN_INTERVAL_MS` (default 80 ms).
 
-## 5. 脚本
+## 5. Scripts
 
-| 命令 | 用途 | 示例 |
+| Command | Purpose | Example |
 | --- | --- | --- |
-| `pnpm dev` | 本地开发服务器（默认 3000 端口） | `pnpm dev` |
-| `pnpm build` | 生产构建（含 TypeScript 类型检查） | `pnpm build` |
-| `pnpm start` | 启动生产服务（需先 `pnpm build`） | `pnpm start` |
-| `pnpm lint` | 类型检查（`tsc --noEmit`） | `pnpm lint` |
-| `pnpm db:migrate` | 建库建表（幂等，可重复执行） | `pnpm db:migrate` |
-| `pnpm sync` | 命令行采集，供 cron / CI 调用 | `pnpm sync --all --days 30`<br>`pnpm sync --repo owner/name`<br>`pnpm sync --repo owner/name --json` |
-| `pnpm smoke` | 端到端自检（隔离库，CI 友好） | `pnpm smoke`<br>`pnpm smoke --url http://localhost:3000` |
+| `pnpm dev` | Local dev server (port 3000) | `pnpm dev` |
+| `pnpm build` | Production build (includes the TypeScript check) | `pnpm build` |
+| `pnpm start` | Start the production server (after `pnpm build`) | `pnpm start` |
+| `pnpm lint` | Type check (`tsc --noEmit`) | `pnpm lint` |
+| `pnpm typecheck` | Type check (same command as `pnpm lint`) | `pnpm typecheck` |
+| `pnpm db:migrate` | Create the database and tables (idempotent) | `pnpm db:migrate` |
+| `pnpm sync` | Command-line collection, for cron / CI | `pnpm sync --all --days 30`<br>`pnpm sync --repo owner/name`<br>`pnpm sync --repo owner/name --json` |
+| `pnpm smoke` | End-to-end self-check (isolated database, CI friendly) | `pnpm smoke`<br>`pnpm smoke --url http://localhost:3000` |
 
-### `pnpm sync` 参数
+### `pnpm sync` options
 
-| 参数 | 说明 |
+| Option | Description |
 | --- | --- |
-| `--repo <owner/name>` | 只同步该仓库；库中不存在时先创建占位行再同步（停用的仓库也会被同步） |
-| `--days <n>` | 采集区间 7~90，默认 30 |
-| `--all` | 同步所有 enabled 仓库（默认行为）；与 `--repo` 同时给出时 `--repo` 优先并打印 warning |
-| `--json` | 以 JSON 输出（机器消费），内容含 `scope / days / mode / dbPath / results / summary` |
-| `-h`, `--help` | 打印用法 |
+| `--repo <owner/name>` | Sync only that repository; a placeholder row is created first if it is not in the database (disabled repositories are synced too) |
+| `--days <n>` | Collection window, 7–90, default 30 |
+| `--all` | Sync all enabled repositories (the default behaviour); when combined with `--repo`, `--repo` wins and a warning is printed |
+| `--json` | Machine-readable JSON output containing `scope / days / mode / dbPath / warnings / results / summary` |
+| `-h`, `--help` | Print usage |
 
-默认输出为人类可读表格，每行给出 `status / recordsWritten / durationMs / error`，末尾打印汇总（`成功 N / 部分成功 M / 失败 K`）、`mode` 与数据库路径。
+The default output is a human-readable table with `status / recordsWritten / durationMs / error` per row, followed by a summary (`success N / partial M / error K`), the `mode` and the database path.
 
-退出码：`0` = 全部成功或部分成功；`1` = 至少一个仓库失败（便于 cron 报警）；`2` = 参数非法。
+Exit codes: `0` = everything succeeded or partially succeeded; `1` = at least one repository failed (handy for cron alerting); `2` = invalid arguments.
 
-### `pnpm smoke` 检查项
+### `pnpm smoke` checks
 
-`pnpm smoke` 会先用一个**隔离数据库**跑完整链路，绝不触碰你的 `data/insights.db`：
+`pnpm smoke` runs the whole chain against an **isolated database** first; it never touches your `data/insights.db`:
 
-1. 建表：13 张表齐全。
-2. 自举：`ensureBootstrapped()` 返回 `{ seeded, mode }`，重复调用保持幂等。
-3. 仓库：库中存在仓库。
-4. 指标计算：单仓 30 天区间下 `traffic.daily` / `activity.commits` / `issues.daily` / `overview.statsTrend` 均为 30 个点，`healthScore` 落在 0~100，`insights` 为数组，且递归扫描无 `NaN` / `Infinity`。
-5. 聚合：`overall.repos`、`trend.length`、`perRepo.length` 与仓库数一致。
-6. 空集边界：`computeAggregate([], 30)` 不抛错且 `overall.repos === 0`。
-7. HTTP（可选）：传 `--url` 时校验 `/api/health`、`/api/repos`、`/api/aggregate` 返回 200 且结构符合预期；不传则 `SKIP`。
+1. Schema: all 13 tables present.
+2. Bootstrap: `ensureBootstrapped()` returns `{ seeded, mode }` and stays idempotent when called twice.
+3. Repositories: the database contains at least one repository.
+4. Metric computation: for a single repository over a 30-day window, `traffic.daily` / `activity.commits` / `issues.daily` / `overview.statsTrend` each have 30 points, `healthScore` is within 0–100, `insights` is an array, and a recursive scan finds no `NaN` / `Infinity`.
+5. Aggregate: `overall.repos`, `trend.length` and `perRepo.length` match the repository count.
+6. Empty-set edge case: `computeAggregate([], 30)` does not throw and yields `overall.repos === 0`.
+7. HTTP (optional): with `--url`, `/api/health`, `/api/repos` and `/api/aggregate` must return 200 with the expected shape; without it the check reports `SKIP`.
 
-每项打印 `PASS` / `FAIL` / `SKIP`，失败不中断，最后输出 `smoke: N passed, M failed, K skipped`。存在 FAIL 时退出码为 1。
+Each check prints `PASS` / `FAIL` / `SKIP`, a failure does not abort the run, and the run ends with `smoke: N passed, M failed, K skipped`. Any FAIL makes the exit code 1.
 
-## 6. 页面导览
+## 6. Pages
 
-| 路径 | 作用 |
+| Path | Purpose |
 | --- | --- |
-| `/` | 总览：聚合 KPI、访问量 / 克隆量趋势、提交活跃度趋势、仓库排行、语言构成、跨仓洞察；顶部可切换 7 / 30 / 90 天 |
-| `/repos` | 仓库管理：仓库列表、添加（`owner/name`）、启用 / 停用、单仓同步、删除（级联清空关联数据）、最近同步记录 |
-| `/repos/[owner]/[repo]` | 仓库详情，4 个 Tab：**概览**（Stars/Forks 趋势、语言、Release 节奏、社区健康清单）、**流量**（逐日访问与克隆、来源排行、热门页面）、**活跃度**（每日提交、周增删行、贡献者、最忙星期）、**Issues & PR**（逐日新开/关闭/合并、关闭率、合并率、积压）；支持区间切换与单仓重新同步 |
-| `/compare` | 多仓对比：选择 2~4 个仓库，给出指标矩阵、访问量 / 提交数 / 健康度对比、流量对齐趋势与对比洞察；仓库不足时给出空态提示 |
-| `/settings` | 配置诊断：Token 来源与当前模式、数据库路径、最近 20 次同步记录、采集范围说明、重新同步全部仓库 |
+| `/` | Overview: aggregate KPIs, views / clones trend, commit-activity trend, repository leaderboard, language mix, cross-repo insights; 7 / 30 / 90-day switch in the header |
+| `/repos` | Repository management: list, add (`owner/name`), enable / disable, single-repo sync, delete (cascades to all related data), recent sync runs |
+| `/repos/[owner]/[repo]` | Repository detail with 4 tabs: **Overview** (Stars/Forks trend, languages, release cadence, community checklist), **Traffic** (daily views and clones, referrer ranking, popular paths), **Activity** (daily commits, weekly additions/deletions, contributors, weekday distribution), **Issues & PR** (daily opened/closed/merged, close rate, merge rate, backlog); supports the day-range switch and re-syncing the repository |
+| `/compare` | Multi-repo comparison: pick 2–4 repositories to get a metric matrix, views / commits / health-score comparison, traffic-aligned trend and comparison insights; shows an empty state when there are too few repositories |
+| `/settings` | Configuration diagnostics: token source and current mode, database path, the last 20 sync runs, an explanation of collection scope, and "re-sync all" |
 
 ## 7. HTTP API
 
-统一约定：成功 `200` + JSON；参数错误 `400`；资源不存在 `404`；冲突 `409`；服务端异常 `500` 且响应体为 `{ error, detail? }`。
+Convention: success is `200` with JSON (`POST /api/repos` returns `201` when it creates a repository); bad input is `400`; a missing resource is `404`; a conflict is `409`; a server error is `500` with a `{ error, detail? }` body.
 
-| 方法 | 路径 | 用途 |
+| Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/health` | 健康检查与配置诊断：`ok`、`mode`、Token 状态与来源、仓库数、最近同步时间、数据库路径、限流余量 |
-| `GET` | `/api/repos` | 仓库列表（按 `stars` 降序） |
-| `POST` | `/api/repos` | 添加仓库，请求体 `{ "fullName": "owner/name" }`（也接受 `{ owner, name }`）；已存在返回 `409 { error: "repo_exists" }` |
-| `PATCH` | `/api/repos/:id` | 启用 / 停用仓库，请求体 `{ enabled?: boolean }` |
-| `DELETE` | `/api/repos/:id` | 删除仓库并级联清空全部关联数据 |
-| `POST` | `/api/sync` | 触发采集，请求体 `{ fullName?, days? }`（`days` 默认 30，允许 7~90）；省略 `fullName` 时同步所有 enabled 仓库 |
-| `GET` | `/api/sync` | 最近同步记录，支持 `?limit=20` |
-| `GET` | `/api/metrics/:owner/:repo` | 单仓完整指标，支持 `?days=30`；仓库未入库返回 `404 { error: "repo_not_found" }`，从未同步则返回结构完整的零值指标 |
-| `GET` | `/api/aggregate` | 多仓聚合指标，支持 `?days=30&repos=owner/a,owner/b`；`repos` 省略时取全部 enabled 仓库，空结果 `overall.repos = 0` |
+| `GET` | `/api/health` | Health check and configuration diagnostics: `ok`, `version`, `mode`, token status and source, repository counts, last sync time, database path, rate-limit headroom |
+| `GET` | `/api/repos` | Repository list (sorted by `stars` descending) |
+| `POST` | `/api/repos` | Add a repository with `{ "fullName": "owner/name" }` (`{ owner, name }` is also accepted); an existing repository returns `409 { error: "repo_exists" }` |
+| `PATCH` | `/api/repos/:id` | Enable / disable a repository with `{ enabled: boolean }` (a missing or non-boolean `enabled` returns `400 { error: "invalid_body" }`) |
+| `DELETE` | `/api/repos/:id` | Delete a repository and cascade all related data |
+| `POST` | `/api/sync` | Trigger collection with `{ fullName?, days? }` (`days` defaults to 30, allowed 7–90); omit `fullName` to sync every enabled repository |
+| `GET` | `/api/sync` | Recent sync runs, with `?limit=` (default 20, max 100) |
+| `GET` | `/api/metrics/:owner/:repo` | Full metrics for one repository, with `?days=30`; an unknown repository returns `404 { error: "repo_not_found" }`, and a repository that was never synced returns structure-complete zero metrics |
+| `GET` | `/api/aggregate` | Aggregated metrics, with `?days=30&repos=owner/a,owner/b`; when `repos` is omitted all enabled repositories are used, and an empty result yields `overall.repos = 0` |
 
-以上 9 个「方法 + 路径」组合对应 6 条路由，字段定义见 `docs/CONTRACTS.md` 第 6 节。
+Those 9 "method + path" combinations map to 6 route files; field definitions are in section 6 of `docs/CONTRACTS.md`.
 
-## 8. 数据采集矩阵
+## 8. Data collection matrix
 
-| Insights 模块 | GitHub 接口 | 落库表 | 配额 |
+| Insights module | GitHub endpoint | Table | Requests |
 | --- | --- | --- | --- |
-| 仓库基础信息 | `GET /repos/{o}/{r}` | `repos` | 1 |
-| Stars/Forks 趋势 | 同上（每日快照） | `repo_stat_snapshots` | 0（本地快照） |
-| 访问量 / 克隆 | `GET /repos/{o}/{r}/traffic/views` + `/clones` | `traffic_daily` | 2 |
-| 来源排行 | `GET .../traffic/popular/referrers` | `traffic_referrers` | 1 |
-| 热门页面 | `GET .../traffic/popular/paths` | `traffic_paths` | 1 |
-| 提交频率 | `GET .../stats/commit_activity` | `commit_days` | 1 |
-| 周参与度（增删行） | `GET .../stats/participation` + `/stats/code_frequency` | `participation_weeks` | 2 |
-| 贡献者 | `GET .../contributors?per_page=100` | `contributors` | 1 |
-| Issues / PR 健康度 | GraphQL 最近 100 条 issues/PR | `issue_pr_daily` | 1 |
-| 语言构成 | `GET .../languages` | `repo_languages` | 1 |
-| Release 节奏 | `GET .../releases?per_page=30` | `releases` | 1 |
-| 社区健康档案 | `GET .../community/profile` | `community_profiles` | 1 |
+| Repository basics | `GET /repos/{o}/{r}` + GraphQL counts (open issues / open PRs / watchers) | `repos` | 2 |
+| Stars/Forks trend | same as above (daily snapshot) | `repo_stat_snapshots` | 0 (local snapshot) |
+| Views / clones | `GET /repos/{o}/{r}/traffic/views` + `/clones` | `traffic_daily` | 2 |
+| Referrer ranking | `GET .../traffic/popular/referrers` | `traffic_referrers` | 1 |
+| Popular paths | `GET .../traffic/popular/paths` | `traffic_paths` | 1 |
+| Commit frequency | `GET .../stats/commit_activity` | `commit_days` | 1 |
+| Weekly participation (additions/deletions) | `GET .../stats/participation` + `/stats/code_frequency` | `participation_weeks` | 2 |
+| Contributors | `GET .../contributors?per_page=100` | `contributors` | 1 |
+| Issues / PR health | GraphQL, latest 100 issues and 100 PRs | `issue_pr_daily` | 1 |
+| Languages | `GET .../languages` | `repo_languages` | 1 |
+| Release cadence | `GET .../releases?per_page=30` | `releases` | 1 |
+| Community profile | `GET .../community/profile` | `community_profiles` | 1 |
 
-单仓约 13 次请求；5000/h 配额可覆盖约 380 次全量同步。
+A full sync of one repository issues 14 requests (12 REST calls plus 2 GraphQL queries); the REST 5000/h quota therefore covers roughly 400 full syncs.
 
-## 9. 指标口径
+## 9. Metric definitions
 
-所有日期对外统一为 `YYYY-MM-DD`（UTC），所有比例字段为 `0~1` 的小数，百分比格式化只在前端做。
+Dates are always exposed as `YYYY-MM-DD` (UTC); every ratio is a `0–1` fraction and percentage formatting happens only in the UI.
 
-- `cloneRate = clones / max(1, views)`（`views = 0` 时取 0）
+- `cloneRate = clones / max(1, views)` (`0` when `views = 0`)
 - `avgCommitsPerDay = totalCommits / days`
 - `closeRate = issuesClosed / max(1, issuesOpened)`
 - `mergeRate = prMerged / max(1, prOpened + prMerged)`
 - `staleOpenIssues = max(0, openIssues - issuesClosed)`
-- `starDelta = 区间末 stars - 区间初 stars`（无历史快照时取 0）
-- `releaseCadenceDays`：按 `publishedAt` 倒序相邻间隔的中位数，样本 < 2 → `null`
-- `busiestWeekday`：`activity.commits` 按周几聚合求和最大的中文星期，无数据 → `null`
+- `starDelta = last stars in range - first stars in range` (`0` without history snapshots)
+- `releaseCadenceDays`: median of adjacent gaps ordered by `publishedAt`; fewer than 2 samples → `null`
+- `busiestWeekday`: `activity.commits` summed per weekday, the largest bucket; no data → `null`
 
-`healthScore`（0~100）：
+`healthScore` (0–100):
 
 ```text
 traffic        = min(100, 100 * log1p(views) / log1p(5000))
@@ -224,82 +238,86 @@ community      = community?.healthPercentage ?? 50
 healthScore = round(0.30*traffic + 0.30*activity + 0.20*responsiveness + 0.20*community)
 ```
 
-其中 `avgCloseHours` 无法获得时按 168 处理；聚合视图的 `overall.healthScore` 为各仓库 `healthScore` 按 `views` 加权平均（全部 `views` 为 0 时取算术平均）。
+`avgCloseHours` is treated as 168 hours when it cannot be obtained, so the responsiveness term is an estimate. The aggregate view's `overall.healthScore` is the `views`-weighted mean of the per-repo scores (arithmetic mean when every `views` is 0).
 
-## 10. 架构说明
+## 10. Architecture
 
 ```text
 GithubInsightsAgg/
 ├── src/
-│   ├── app/          App Router：页面（总览 / 仓库 / 详情 / 对比 / 设置）与 REST API 路由
-│   ├── components/   UI 基础组件、图表封装、页面区块（客户端交互唯一入口）
-│   └── lib/          服务端核心：GitHub 客户端与采集器、写库、读库聚合、派生指标、洞察规则
-├── db/               schema.sql（13 张表的唯一事实来源）
-├── scripts/          运维脚本：db:migrate / sync（cron 采集）/ smoke（端到端自检）
-├── docs/             设计与契约文档（PLAN、CONTRACTS、CONTRACTS-ADDENDUM）
-├── data/             SQLite 数据库文件（默认 insights.db，随 .gitignore 忽略）
-└── 根配置            package.json、tsconfig.json、next.config.ts、postcss.config.mjs、.env.example
+│   ├── app/          App Router: pages (overview / repos / detail / compare / settings) and REST API routes
+│   ├── components/   UI primitives, chart wrappers, page sections (the only client-side entry points)
+│   └── lib/          Server core: GitHub client and collectors, writers, read/aggregate layer, derived metrics, insight rules
+├── db/               schema.sql (single source of truth for the 13 tables)
+├── scripts/          Operational scripts: db:migrate / sync (cron collection) / smoke (end-to-end self-check)
+├── docs/             Design and contract documents (PLAN, CONTRACTS, CONTRACTS-ADDENDUM)
+├── data/             SQLite database files (default insights.db, gitignored)
+└── root config       package.json, tsconfig.json, next.config.ts, postcss.config.mjs, .env.example
 ```
 
-数据流（自上而下单向，不在页面里做计算）：
+Data flow (strictly one direction; pages never compute metrics):
 
 ```text
 GitHub REST v3 / GraphQL v4
-        ↓  src/lib/github（client：重试 / 限流 / 节流 / ETag；collectors：traffic / activity / issues / overview）
-  src/lib/sync.ts（编排：逐组 try/catch，单组失败 → partial）
+        ↓  src/lib/github (client: retries / rate limiting / throttling; collectors: traffic / activity / issues / overview)
+  src/lib/sync.ts (orchestration: one try/catch per section, a failing section → partial)
         ↓
-  src/lib/sync-store.ts（参数化 SQL，upsert / replace 两类语义，写 run 记录）
+  src/lib/sync-store.ts (parameterised SQL, upsert / replace semantics, writes run records)
         ↓
-  SQLite（node:sqlite）· 13 张表
+  SQLite (node:sqlite) · 13 tables
         ↓
-  src/lib/metrics-store.ts（只读，按区间查表）
+  src/lib/metrics-store.ts (read-only, range queries)
         ↓
-  src/lib/analytics.ts（派生指标 + healthScore）→ src/lib/insights.ts（规则引擎，中文洞察）
+  src/lib/analytics.ts (derived metrics + healthScore) → src/lib/insights.ts (rule engine, Chinese text)
         ↓
-  Server Component 页面 / REST API（/api/*）
+  Server Component pages / REST API (/api/*)
 ```
 
-演示模式不是「读取时替换数据」：同步阶段就把合成数据写进同一批表，因此读库、指标、页面三条链路完全共用一套代码，`mode` 只用于响应标记与 UI 提示。
+Demo mode is not "substitute data at read time": the synthetic rows are written into the same tables during sync, so the read layer, the metrics and the pages all share one code path. `mode` only drives the response marker and the UI hint.
 
-## 11. 定时采集
+## 11. Scheduled collection
 
-项目不自带调度器，用系统 cron 调用 `pnpm sync` 即可：
+The project ships no scheduler; call `pnpm sync` from system cron:
 
 ```cron
-# 每天 03:00 采集所有已启用仓库的近 30 天窗口
+# Every day at 03:00, collect the last 30-day window for all enabled repositories
 0 3 * * * cd /srv/GithubInsightsAgg && /bin/bash -lc 'pnpm sync --all --days 30' >> /srv/GithubInsightsAgg/logs/sync.log 2>&1
 ```
 
-要点：
+Notes:
 
-- cron 的 `PATH` 很精简，用 `/bin/bash -lc '...'`（或改用 pnpm 绝对路径）才能加载 nvm / corepack 配置。
-- `logs/` 目录需提前创建，日志会持续追加。
-- 退出码可用于报警：`0` 表示全部成功或部分成功，`1` 表示至少一个仓库失败，`2` 表示参数非法。也可以配 `MAILTO` 让 cron 在非零退出时发邮件。
-- 想让日志更适合机器解析时改用 `pnpm sync --all --json`，输出为单个 JSON 对象。
-- 采集频率建议每天 1 次：Traffic 只有 14 天窗口，日更足以保证不丢数据，同时节省配额。
+- cron's `PATH` is minimal; use `/bin/bash -lc '...'` (or an absolute pnpm path) so that nvm / corepack configuration is loaded.
+- Create the `logs/` directory beforehand; the log is appended to.
+- Exit codes work for alerting: `0` means everything succeeded or partially succeeded, `1` means at least one repository failed, `2` means invalid arguments. `MAILTO` makes cron mail you on a non-zero exit.
+- For machine parsing use `pnpm sync --all --json`, which prints a single JSON object.
+- Once a day is enough: the traffic window is only 14 days, so daily syncs never lose data while staying cheap on quota.
 
-## 12. 已知限制
+## 12. Known limitations
 
-- **Traffic 仅 14 天**：GitHub 只提供最近 14 天明细，历史靠每日同步累积，首次使用看不到更早的数据。
-- **Traffic 需要 push 权限**：只读 Token 无法采集他人仓库的 views / clones，本次同步会标记为「部分成功」。
-- **contributors 取前 100**：`/contributors?per_page=100` 只取一页，超大仓库的贡献者总数会偏小。
-- **Issue / PR 基于最近 100 条**：GraphQL 一次拉最近 100 条 issues 与 100 条 PR 在本地按日聚合，更早的历史不会进入 `issue_pr_daily`。
-- **`/stats/*` 可能「计算中」**：GitHub 未命中缓存时返回 202 + 空 body，采集会退避重试，仍失败则该组标记跳过，本次同步为 partial。
-- **无 `avgCloseHours` 时按 168 小时估算**：响应度评分因此是近似值。
-- **本机 `gh` 已登录时不会进演示模式**：Token 解析链会拿到 `gh auth token`，此时空库不会自举演示仓库。
-- **单用户、无鉴权**：没有账号体系与多用户隔离，请勿直接暴露到公网。
-- **无内置调度器**：需要 cron 或外部调度器调用 `pnpm sync`。
-- **不做 GitHub App 安装流 / OAuth 登录**：只支持 PAT 与 `gh` CLI 的 Token。
-- **无 AI 摘要**：洞察全部来自规则引擎，二期才考虑模型摘要（接口位置已预留）。
-- **Open Issues 口径**：优先用 GraphQL `issues(states: OPEN){ totalCount }`（不含 PR）；GraphQL 不可用时回退 REST 的 `open_issues_count`（含 PR，会偏大）。
+- **Traffic covers only 14 days**: GitHub exposes just the last 14 days, so history accumulates through daily syncs; the first run cannot show anything older.
+- **Traffic needs push access**: a read-only token cannot collect views / clones for someone else's repository, and that run is marked "partial".
+- **Contributors limited to the first 100**: `/contributors?per_page=100` fetches one page, so the contributor total of very large repositories is understated.
+- **Issues / PRs limited to the latest 100 each**: GraphQL pulls the latest 100 issues and 100 PRs once, aggregated locally per day; older history never reaches `issue_pr_daily`.
+- **`/stats/*` may answer "computing"**: when GitHub's cache is cold it returns 202 with an empty body; collection backs off and retries, and if it still fails that section is skipped and the run is partial.
+- **`avgCloseHours` falls back to 168 hours**: the responsiveness term is therefore approximate.
+- **A logged-in `gh` on the machine disables demo mode**: the token chain finds `gh auth token`, so an empty database is not seeded with demo repositories.
+- **Single user, no authentication**: there are no accounts and no per-user isolation, so do not expose it to the public internet.
+- **No built-in scheduler**: drive `pnpm sync` from cron or another external scheduler.
+- **No GitHub App install flow / OAuth login**: only PATs and the `gh` CLI token are supported.
+- **No AI summaries**: insights come entirely from the rule engine; model-generated summaries are future work (the extension point exists).
+- **Open Issues definition**: the GraphQL `issues(states: OPEN){ totalCount }` count (excluding PRs) is preferred; when GraphQL is unavailable it falls back to REST's `open_issues_count`, which includes PRs and therefore reads high.
 
-## 13. 技术栈
+## 13. Tech stack
 
-| 层 | 选型 |
+| Layer | Choice |
 | --- | --- |
-| 框架 | Next.js 16（App Router，Server Component 直连数据库） |
-| UI | React 19 + TypeScript 5.9 + Tailwind CSS 4 |
-| 图表 | ECharts 6（按需注册 + 自建薄封装） |
-| 存储 | `node:sqlite`（Node 内置，零 ORM、零原生编译） |
-| 数据源 | GitHub REST v3（Traffic / stats）+ GraphQL v4（Issues / PR / watchers） |
-| 包管理 | pnpm |
+| Framework | Next.js 16.4.6 (App Router, Server Components query the database directly) |
+| UI | React 19.3.1 + TypeScript 5.9 (`^5.9.0`) + Tailwind CSS 4.3.5 |
+| Charts | ECharts 6.1.0 (on-demand registration plus thin local wrappers) |
+| Storage | `node:sqlite` (Node's built-in `DatabaseSync`; no ORM, no native build, requires Node >= 22.5) |
+| Data source | GitHub REST v3 (traffic / stats) + GraphQL v4 (issues / PRs / watcher counts) |
+| Package manager | pnpm |
+
+## License
+
+MIT — see [LICENSE](LICENSE).
