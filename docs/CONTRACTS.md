@@ -463,7 +463,7 @@ export interface ApiError { error: string; detail?: string; }
 → `201 { repo: RepoSummary, mode: DataMode }`
 
 ### `PATCH /api/repos/:id`
-请求体 `{ enabled?: boolean }` → `{ repo: RepoSummary }`
+请求体 `{ enabled: boolean }`（必填且必须是布尔值，否则 400 `invalid_body`）→ `{ repo: RepoSummary }`
 
 ### `DELETE /api/repos/:id`
 → `{ ok: true }`（级联删除所有关联数据）
