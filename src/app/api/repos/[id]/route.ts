@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 
 import { ensureBootstrapped } from '@/lib/bootstrap';
 import { deleteRepo, getRepoById, setRepoEnabled } from '@/lib/repo-store';
+import { formatZodError, repoIdSchema, repoPatchSchema } from '@/lib/validation';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -15,28 +16,20 @@ function internalError(error: unknown): NextResponse {
   );
 }
 
-function parseRepoId(raw: string): number | null {
-  const value = Number(raw);
-  if (!Number.isFinite(value) || !Number.isInteger(value) || value <= 0) return null;
-  return value;
-}
-
-function readEnabled(body: unknown): boolean | null {
-  if (!body || typeof body !== 'object') return null;
-  const record = body as Record<string, unknown>;
-  if (typeof record.enabled !== 'boolean') return null;
-  return record.enabled;
-}
-
 export async function PATCH(request: NextRequest, context: RouteContext): Promise<NextResponse> {
   try {
     ensureBootstrapped();
 
     const { id } = await context.params;
-    const repoId = parseRepoId(id);
-    if (repoId === null) {
-      return NextResponse.json({ error: 'repo_not_found' }, { status: 404 });
+    const parsedId = repoIdSchema.safeParse(id);
+    if (!parsedId.success) {
+      // id 不是正整数等同于「这个仓库不存在」，保持原有 404 语义
+      return NextResponse.json(
+        { error: 'repo_not_found', detail: formatZodError(parsedId.error) },
+        { status: 404 },
+      );
     }
+    const repoId = parsedId.data;
 
     let body: unknown = null;
     try {
@@ -44,10 +37,14 @@ export async function PATCH(request: NextRequest, context: RouteContext): Promis
     } catch {
       body = null;
     }
-    const enabled = readEnabled(body);
-    if (enabled === null) {
-      return NextResponse.json({ error: 'invalid_body' }, { status: 400 });
+    const parsedBody = repoPatchSchema.safeParse(body);
+    if (!parsedBody.success) {
+      return NextResponse.json(
+        { error: 'invalid_body', detail: formatZodError(parsedBody.error) },
+        { status: 400 },
+      );
     }
+    const { enabled } = parsedBody.data;
 
     const existing = getRepoById(repoId);
     if (!existing) {
@@ -67,12 +64,15 @@ export async function DELETE(_request: NextRequest, context: RouteContext): Prom
     ensureBootstrapped();
 
     const { id } = await context.params;
-    const repoId = parseRepoId(id);
-    if (repoId === null) {
-      return NextResponse.json({ error: 'repo_not_found' }, { status: 404 });
+    const parsedId = repoIdSchema.safeParse(id);
+    if (!parsedId.success) {
+      return NextResponse.json(
+        { error: 'repo_not_found', detail: formatZodError(parsedId.error) },
+        { status: 404 },
+      );
     }
 
-    const removed = deleteRepo(repoId);
+    const removed = deleteRepo(parsedId.data);
     if (!removed) {
       return NextResponse.json({ error: 'repo_not_found' }, { status: 404 });
     }

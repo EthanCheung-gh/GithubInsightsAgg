@@ -104,22 +104,49 @@ pnpm dev        # http://localhost:3000
 
 ## 4. 配置 GitHub Token
 
-在 `.env` 里填写：
+三种方式任选其一，推荐顺序自上而下。
 
-```bash
-GITHUB_TOKEN="ghp_xxx"
-```
+### 4.1 应用内一键授权（推荐）
+
+走 GitHub OAuth **Device Flow**，全程不需要复制 Token。
+
+1. 在 GitHub 注册 OAuth App：**Settings → Developer settings → OAuth Apps → New OAuth App**（名字与主页随意填，回调地址 Device Flow 用不到）。
+2. 在应用详情页勾选 **Enable Device Flow**。
+3. 把 Client ID 写进 `.env` 并重启服务：
+
+   ```bash
+   GITHUB_OAUTH_CLIENT_ID="Iv1.xxxxxxxxxxxx"
+   ```
+
+   **只需 Client ID，不需要 Client Secret。**
+4. 打开 `/settings`，点击「一键连接 GitHub」，把页面上的验证码填到自动打开的 GitHub 页面并同意授权。Token 会被校验、落库并立即生效，无需重启。
+
+未配置 `GITHUB_OAUTH_CLIENT_ID` 时设置页会隐藏该按钮，自动降级为 4.2。
+
+### 4.2 应用内手动粘贴
+
+在 `/settings` 点击「去 GitHub 创建 Token」：链接已预填 `repo` 与 `read:org` 权限（不要改小，缺少 `repo` 就读不到 Traffic）。把 Token 粘贴到密码框并保存，系统会用 `GET /user` 校验、写入本地库并立即使用。
 
 支持的 Token 类型：
 
 - **fine-grained PAT**：选中要采集的仓库，至少给 `Metadata: Read-only`、`Contents: Read-only`、`Issues: Read-only`、`Pull requests: Read-only`；要读 Traffic 还需给 `Administration: Read-only`（Traffic 接口要求对该仓库有 push 权限）。
 - **classic PAT**：勾选 `repo`（含私有仓库）或 `public_repo`（仅公开仓库）。
 
-其他取值也可用：`GH_TOKEN` 与 `GITHUB_TOKEN` 等价；两者都没有时，会尝试读取本机已登录的 `gh` CLI（`gh auth token`）作为回退。
+### 4.3 环境变量 / gh CLI
 
-解析顺序固定为：`GITHUB_TOKEN` → `GH_TOKEN` → `gh auth token` → 演示模式。
+传统方式，适合 CI 与容器，在 `.env` 里填写：
+
+```bash
+GITHUB_TOKEN="ghp_xxx"
+```
+
+`GH_TOKEN` 与 `GITHUB_TOKEN` 等价；两者都没有时，会尝试读取本机已登录的 `gh` CLI（`gh auth token`）。
+
+解析顺序固定为：`GITHUB_TOKEN` → `GH_TOKEN` → 应用内保存的 Token（`app_settings.github_token`）→ `gh auth token` → 演示模式。环境变量优先级最高，若想用设置页管理 Token，请把 `GITHUB_TOKEN` 留空。
 
 **Traffic 的平台限制**：GitHub 只允许「对该仓库有 push 权限的 Token」读取 views / clones / referrers / paths。对只有读权限的他人仓库，Traffic 采集会失败，其余指标（提交、贡献者、Issue/PR、语言、Release、社区档案）照常采集，本次同步会被标记为「部分成功」。这不是本项目的缺陷，而是 GitHub 的接口限制。
+
+**Token 存储**：设置页保存的 Token 以**明文**存放在本地 SQLite 的 `app_settings` 表中。只有服务端进程会读取它，任何 HTTP 响应都只返回掩码（如 `ghp_…ab12`），但请不要把 `data/` 目录拷贝或共享出去；共享机器上建议改用环境变量。
 
 采集节流可调：`GITHUB_MIN_INTERVAL_MS`（默认 80ms）。
 
@@ -154,7 +181,7 @@ GITHUB_TOKEN="ghp_xxx"
 
 `pnpm smoke` 会先用一个**隔离数据库**跑完整链路，绝不触碰你的 `data/insights.db`：
 
-1. 建表：13 张表齐全。
+1. 建表：14 张表齐全。
 2. 自举：`ensureBootstrapped()` 返回 `{ seeded, mode }`，重复调用保持幂等。
 3. 仓库：库中存在仓库。
 4. 指标计算：单仓 30 天区间下 `traffic.daily` / `activity.commits` / `issues.daily` / `overview.statsTrend` 均为 30 个点，`healthScore` 落在 0~100，`insights` 为数组，且递归扫描无 `NaN` / `Infinity`。
@@ -172,7 +199,7 @@ GITHUB_TOKEN="ghp_xxx"
 | `/repos` | 仓库管理：仓库列表、添加（`owner/name`）、启用 / 停用、单仓同步、删除（级联清空关联数据）、最近同步记录 |
 | `/repos/[owner]/[repo]` | 仓库详情，4 个 Tab：**概览**（Stars/Forks 趋势、语言、Release 节奏、社区健康清单）、**流量**（逐日访问与克隆、来源排行、热门页面）、**活跃度**（每日提交、周增删行、贡献者、最忙星期）、**Issues & PR**（逐日新开/关闭/合并、关闭率、合并率、积压）；支持区间切换与单仓重新同步 |
 | `/compare` | 多仓对比：选择 2~4 个仓库，给出指标矩阵、访问量 / 提交数 / 健康度对比、流量对齐趋势与对比洞察；仓库不足时给出空态提示 |
-| `/settings` | 配置诊断：Token 来源与当前模式、数据库路径、最近 20 次同步记录、采集范围说明、重新同步全部仓库 |
+| `/settings` | 配置与诊断：GitHub Token 面板（一键 Device Flow 授权、手动粘贴、清除 Token）、Token 来源与当前模式、数据库路径、最近 20 次同步记录、采集范围说明、重新同步全部仓库 |
 
 ## 7. HTTP API
 
@@ -189,8 +216,13 @@ GITHUB_TOKEN="ghp_xxx"
 | `GET` | `/api/sync` | 最近同步记录，支持 `?limit=20` |
 | `GET` | `/api/metrics/:owner/:repo` | 单仓完整指标，支持 `?days=30`；仓库未入库返回 `404 { error: "repo_not_found" }`，从未同步则返回结构完整的零值指标 |
 | `GET` | `/api/aggregate` | 多仓聚合指标，支持 `?days=30&repos=owner/a,owner/b`；`repos` 省略时取全部 enabled 仓库，空结果 `overall.repos = 0` |
+| `GET` | `/api/auth/token` | 当前 Token 状态（绝不返回明文）：`configured`、`source`（`env` / `stored` / `gh-cli` / `none`）、`maskedToken`、`canClear`、`deviceFlowAvailable` 与 GitHub 相关链接 |
+| `POST` | `/api/auth/token` | 保存粘贴的 Token：先 `GET /user` 校验，再落库，返回 `{ ok, login, scopes, maskedToken }`；无效 Token 返回 `400 { error: "invalid_token" }` |
+| `DELETE` | `/api/auth/token` | 清除应用内保存的 Token（来自环境变量时 `409 { error: "token_from_env" }`，不存在时 `404 { error: "no_stored_token" }`） |
+| `POST` | `/api/auth/device` | 发起 OAuth Device Flow：`{ deviceCode, userCode, verificationUri, expiresIn, interval }`；未配置 `GITHUB_OAUTH_CLIENT_ID` 返回 `501 { error: "device_flow_unavailable" }` |
+| `GET` | `/api/auth/device` | 用 `?deviceCode=` 轮询授权状态，恒为 `200`，按 `state` 分发：`pending` / `slow_down` / `success` / `error` |
 
-以上 9 个「方法 + 路径」组合对应 6 条路由，字段定义见 `docs/CONTRACTS.md` 第 6 节。
+以上 14 个「方法 + 路径」组合对应 8 条路由，字段定义见 `docs/CONTRACTS.md` 第 6 节。
 
 ## 8. 数据采集矩阵
 
@@ -245,7 +277,7 @@ GithubInsightsAgg/
 │   ├── app/          App Router：页面（总览 / 仓库 / 详情 / 对比 / 设置）与 REST API 路由
 │   ├── components/   UI 基础组件、图表封装、页面区块（客户端交互唯一入口）
 │   └── lib/          服务端核心：GitHub 客户端与采集器、写库、读库聚合、派生指标、洞察规则
-├── db/               schema.sql（13 张表的唯一事实来源）
+├── db/               schema.sql（14 张表的唯一事实来源）
 ├── scripts/          运维脚本：db:migrate / sync（cron 采集）/ smoke（端到端自检）
 ├── docs/             设计与契约文档（PLAN、CONTRACTS、CONTRACTS-ADDENDUM）
 ├── data/             SQLite 数据库文件（默认 insights.db，随 .gitignore 忽略）
@@ -261,7 +293,7 @@ GitHub REST v3 / GraphQL v4
         ↓
   src/lib/sync-store.ts（参数化 SQL，upsert / replace 两类语义，写 run 记录）
         ↓
-  SQLite（node:sqlite）· 13 张表
+  SQLite（node:sqlite）· 14 张表
         ↓
   src/lib/metrics-store.ts（只读，按区间查表）
         ↓
@@ -300,7 +332,7 @@ GitHub REST v3 / GraphQL v4
 - **本机 `gh` 已登录时不会进演示模式**：Token 解析链会拿到 `gh auth token`，此时空库不会自举演示仓库。
 - **单用户、无鉴权**：没有账号体系与多用户隔离，请勿直接暴露到公网。
 - **无内置调度器**：需要 cron 或外部调度器调用 `pnpm sync`。
-- **不做 GitHub App 安装流 / OAuth 登录**：只支持 PAT 与 `gh` CLI 的 Token。
+- **不做 GitHub App 安装流**：Token 只来自 PAT、OAuth Device Flow（`GITHUB_OAUTH_CLIENT_ID`）或 `gh` CLI，没有按安装授权的 App Token。
 - **无 AI 摘要**：洞察全部来自规则引擎，二期才考虑模型摘要（接口位置已预留）。
 - **Open Issues 口径**：优先用 GraphQL `issues(states: OPEN){ totalCount }`（不含 PR）；GraphQL 不可用时回退 REST 的 `open_issues_count`（含 PR，会偏大）。
 

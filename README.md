@@ -107,22 +107,49 @@ Note: if you have already run `gh auth login` on this machine, the project picks
 
 ## 4. GitHub token configuration
 
-Put it in `.env`:
+There are three ways to give the app a token. Pick one — the recommended order is top to bottom.
 
-```bash
-GITHUB_TOKEN="ghp_xxx"
-```
+### 4.1 In-app one-click authorization (recommended)
+
+Uses GitHub's OAuth **Device Flow**, so no token is ever copied around.
+
+1. Register an OAuth App on GitHub: **Settings → Developer settings → OAuth Apps → New OAuth App** (any name / homepage; the callback URL is not used by the device flow).
+2. On the app's detail page, tick **Enable Device Flow**.
+3. Put its Client ID into `.env` and restart the service:
+
+   ```bash
+   GITHUB_OAUTH_CLIENT_ID="Iv1.xxxxxxxxxxxx"
+   ```
+
+   **Only the Client ID is needed — no Client Secret.**
+4. Open `/settings`, click **一键连接 GitHub**, copy the code shown on the page into the GitHub page that opens, and approve. The token is validated, stored locally and used immediately — no restart.
+
+If `GITHUB_OAUTH_CLIENT_ID` is empty the settings page hides the button and falls back to 4.2.
+
+### 4.2 In-app manual paste
+
+On `/settings` click **去 GitHub 创建 Token**: the link is prefilled with the `repo` and `read:org` scopes (do not narrow them — without `repo` the traffic endpoints are off limits). Paste the token into the password field and save; it is verified with `GET /user`, stored in the local database and picked up immediately.
 
 Supported token types:
 
 - **Fine-grained PAT**: select the repositories to collect; grant at least `Metadata: Read-only`, `Contents: Read-only`, `Issues: Read-only`, `Pull requests: Read-only`. Traffic additionally needs `Administration: Read-only` (the traffic endpoints require push access to that repository).
 - **Classic PAT**: tick `repo` (includes private repositories) or `public_repo` (public repositories only).
 
-`GH_TOKEN` works as well and is equivalent to `GITHUB_TOKEN`; when neither is set, the project tries the locally logged-in `gh` CLI (`gh auth token`) as a fallback.
+### 4.3 Environment variable / gh CLI
 
-The resolution order is fixed: `GITHUB_TOKEN` → `GH_TOKEN` → `gh auth token` → demo mode.
+The classic path, best suited to CI and containers — put it in `.env`:
+
+```bash
+GITHUB_TOKEN="ghp_xxx"
+```
+
+`GH_TOKEN` is equivalent. When neither is set, the project also tries the locally logged-in `gh` CLI (`gh auth token`).
+
+The resolution order is fixed: `GITHUB_TOKEN` → `GH_TOKEN` → token saved in the app (`app_settings.github_token`) → `gh auth token` → demo mode. Environment variables win, so leave `GITHUB_TOKEN` empty if you want to manage the token from the settings page.
 
 **Traffic platform limit**: GitHub only lets a token read views / clones / referrers / paths for repositories that token can push to. For someone else's repository with read-only access, traffic collection fails while every other metric (commits, contributors, issues/PRs, languages, releases, community profile) is collected normally, and the sync run is marked "partial". This is a GitHub API limitation, not a defect of this project.
+
+**Token storage**: a token saved from the settings page is kept in **plaintext** in the local SQLite database (`app_settings`). Only the server process reads it and every HTTP response returns a masked value (`ghp_…ab12`), but do not copy or share the `data/` directory — use an environment variable instead on a shared machine.
 
 Collection throttling is configurable: `GITHUB_MIN_INTERVAL_MS` (default 80 ms).
 
@@ -157,7 +184,7 @@ Exit codes: `0` = everything succeeded or partially succeeded; `1` = at least on
 
 `pnpm smoke` runs the whole chain against an **isolated database** first; it never touches your `data/insights.db`:
 
-1. Schema: all 13 tables present.
+1. Schema: all 14 tables present.
 2. Bootstrap: `ensureBootstrapped()` returns `{ seeded, mode }` and stays idempotent when called twice.
 3. Repositories: the database contains at least one repository.
 4. Metric computation: for a single repository over a 30-day window, `traffic.daily` / `activity.commits` / `issues.daily` / `overview.statsTrend` each have 30 points, `healthScore` is within 0–100, `insights` is an array, and a recursive scan finds no `NaN` / `Infinity`.
@@ -175,7 +202,7 @@ Each check prints `PASS` / `FAIL` / `SKIP`, a failure does not abort the run, an
 | `/repos` | Repository management: list, add (`owner/name`), enable / disable, single-repo sync, delete (cascades to all related data), recent sync runs |
 | `/repos/[owner]/[repo]` | Repository detail with 4 tabs: **Overview** (Stars/Forks trend, languages, release cadence, community checklist), **Traffic** (daily views and clones, referrer ranking, popular paths), **Activity** (daily commits, weekly additions/deletions, contributors, weekday distribution), **Issues & PR** (daily opened/closed/merged, close rate, merge rate, backlog); supports the day-range switch and re-syncing the repository |
 | `/compare` | Multi-repo comparison: pick 2–4 repositories to get a metric matrix, views / commits / health-score comparison, traffic-aligned trend and comparison insights; shows an empty state when there are too few repositories |
-| `/settings` | Configuration diagnostics: token source and current mode, database path, the last 20 sync runs, an explanation of collection scope, and "re-sync all" |
+| `/settings` | Configuration and diagnostics: GitHub token panel (one-click device-flow authorization, manual token paste, clear token), token source and current mode, database path, the last 20 sync runs, an explanation of collection scope, and "re-sync all" |
 
 ## 7. HTTP API
 
@@ -192,8 +219,13 @@ Convention: success is `200` with JSON (`POST /api/repos` returns `201` when it 
 | `GET` | `/api/sync` | Recent sync runs, with `?limit=` (default 20, max 100) |
 | `GET` | `/api/metrics/:owner/:repo` | Full metrics for one repository, with `?days=30`; an unknown repository returns `404 { error: "repo_not_found" }`, and a repository that was never synced returns structure-complete zero metrics |
 | `GET` | `/api/aggregate` | Aggregated metrics, with `?days=30&repos=owner/a,owner/b`; when `repos` is omitted all enabled repositories are used, and an empty result yields `overall.repos = 0` |
+| `GET` | `/api/auth/token` | Current token state (never the plaintext): `configured`, `source` (`env` / `stored` / `gh-cli` / `none`), `maskedToken`, `canClear`, `deviceFlowAvailable` and the GitHub links |
+| `POST` | `/api/auth/token` | Save a pasted token: validates it with `GET /user`, stores it locally, returns `{ ok, login, scopes, maskedToken }`; an invalid token returns `400 { error: "invalid_token" }` |
+| `DELETE` | `/api/auth/token` | Clear the token saved in the app (`409 { error: "token_from_env" }` when it comes from the environment, `404 { error: "no_stored_token" }` when there is none) |
+| `POST` | `/api/auth/device` | Start the OAuth Device Flow: `{ deviceCode, userCode, verificationUri, expiresIn, interval }`; `501 { error: "device_flow_unavailable" }` without `GITHUB_OAUTH_CLIENT_ID` |
+| `GET` | `/api/auth/device` | Poll the device flow with `?deviceCode=`; always `200`, dispatch on `state`: `pending` / `slow_down` / `success` / `error` |
 
-Those 9 "method + path" combinations map to 6 route files; field definitions are in section 6 of `docs/CONTRACTS.md`.
+Those 14 "method + path" combinations map to 8 route files; field definitions are in section 6 of `docs/CONTRACTS.md`.
 
 ## 8. Data collection matrix
 
@@ -248,7 +280,7 @@ GithubInsightsAgg/
 │   ├── app/          App Router: pages (overview / repos / detail / compare / settings) and REST API routes
 │   ├── components/   UI primitives, chart wrappers, page sections (the only client-side entry points)
 │   └── lib/          Server core: GitHub client and collectors, writers, read/aggregate layer, derived metrics, insight rules
-├── db/               schema.sql (single source of truth for the 13 tables)
+├── db/               schema.sql (single source of truth for the 14 tables)
 ├── scripts/          Operational scripts: db:migrate / sync (cron collection) / smoke (end-to-end self-check)
 ├── docs/             Design and contract documents (PLAN, CONTRACTS, CONTRACTS-ADDENDUM)
 ├── data/             SQLite database files (default insights.db, gitignored)
@@ -264,7 +296,7 @@ GitHub REST v3 / GraphQL v4
         ↓
   src/lib/sync-store.ts (parameterised SQL, upsert / replace semantics, writes run records)
         ↓
-  SQLite (node:sqlite) · 13 tables
+  SQLite (node:sqlite) · 14 tables
         ↓
   src/lib/metrics-store.ts (read-only, range queries)
         ↓
@@ -303,7 +335,7 @@ Notes:
 - **A logged-in `gh` on the machine disables demo mode**: the token chain finds `gh auth token`, so an empty database is not seeded with demo repositories.
 - **Single user, no authentication**: there are no accounts and no per-user isolation, so do not expose it to the public internet.
 - **No built-in scheduler**: drive `pnpm sync` from cron or another external scheduler.
-- **No GitHub App install flow / OAuth login**: only PATs and the `gh` CLI token are supported.
+- **No GitHub App install flow**: tokens come from a PAT, the OAuth device flow (`GITHUB_OAUTH_CLIENT_ID`) or the `gh` CLI; there is no per-installation app token.
 - **No AI summaries**: insights come entirely from the rule engine; model-generated summaries are future work (the extension point exists).
 - **Open Issues definition**: the GraphQL `issues(states: OPEN){ totalCount }` count (excluding PRs) is preferred; when GraphQL is unavailable it falls back to REST's `open_issues_count`, which includes PRs and therefore reads high.
 

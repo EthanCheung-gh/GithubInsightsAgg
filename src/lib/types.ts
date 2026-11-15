@@ -220,7 +220,7 @@ export interface HealthPayload {
   mode: DataMode;
   tokenConfigured: boolean;
   tokenSource: 'env' | 'none';
-  tokenSourceDetail?: 'env' | 'gh-cli' | 'none';
+  tokenSourceDetail?: 'env' | 'stored' | 'gh-cli' | 'none';
   repoCount: number;
   enabledRepoCount: number;
   lastSyncAt: string | null;

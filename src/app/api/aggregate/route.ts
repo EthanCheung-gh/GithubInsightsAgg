@@ -2,15 +2,12 @@ import { NextResponse, type NextRequest } from 'next/server';
 
 import { computeAggregate } from '@/lib/analytics';
 import { ensureBootstrapped } from '@/lib/bootstrap';
-import { getRepoByFullName, listRepos, normalizeFullName } from '@/lib/repo-store';
+import { getRepoByFullName, listRepos } from '@/lib/repo-store';
 import type { RepoSummary } from '@/lib/types';
+import { aggregateQuerySchema, formatZodError } from '@/lib/validation';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
-
-const DEFAULT_DAYS = 30;
-const MIN_DAYS = 7;
-const MAX_DAYS = 90;
 
 function internalError(error: unknown): NextResponse {
   return NextResponse.json(
@@ -19,25 +16,15 @@ function internalError(error: unknown): NextResponse {
   );
 }
 
-function parseDays(raw: string | null): number | null {
-  if (raw === null || raw.trim() === '') return DEFAULT_DAYS;
-  const value = Number(raw);
-  if (!Number.isFinite(value) || !Number.isInteger(value)) return null;
-  if (value < MIN_DAYS || value > MAX_DAYS) return null;
-  return value;
-}
-
-/** `?repos=owner/a,owner/b`：逐项规范化，非法项与未入库项忽略。 */
-function selectRepos(raw: string): RepoSummary[] {
+/** 已通过 schema 校验的 `owner/name` 列表：去重后映射到库内仓库，未入库项忽略。 */
+function selectRepos(fullNames: string[]): RepoSummary[] {
   const selected: RepoSummary[] = [];
   const seen = new Set<string>();
-  for (const item of raw.split(',')) {
-    const normalized = normalizeFullName(item.trim());
-    if (!normalized) continue;
-    const key = normalized.toLowerCase();
+  for (const fullName of fullNames) {
+    const key = fullName.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    const repo = getRepoByFullName(normalized);
+    const repo = getRepoByFullName(fullName);
     if (repo) selected.push(repo);
   }
   return selected;
@@ -47,16 +34,28 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
     ensureBootstrapped();
 
-    const days = parseDays(request.nextUrl.searchParams.get('days'));
-    if (days === null) {
-      return NextResponse.json({ error: 'invalid_days' }, { status: 400 });
+    const searchParams = request.nextUrl.searchParams;
+    const parsed = aggregateQuerySchema.safeParse({
+      days: searchParams.get('days'),
+      repos: searchParams.get('repos'),
+    });
+    if (!parsed.success) {
+      // 与改造前一致：days 的问题优先于 repos
+      const daysInvalid = parsed.error.issues.some((issue) => issue.path[0] === 'days');
+      return NextResponse.json(
+        {
+          error: daysInvalid ? 'invalid_days' : 'invalid_full_name',
+          detail: formatZodError(parsed.error),
+        },
+        { status: 400 },
+      );
     }
 
-    const rawRepos = request.nextUrl.searchParams.get('repos');
+    const { days, repos: repoFullNames } = parsed.data;
     const repos =
-      rawRepos === null || rawRepos.trim() === ''
+      repoFullNames === null
         ? listRepos({ enabledOnly: true, sort: 'stars' })
-        : selectRepos(rawRepos);
+        : selectRepos(repoFullNames);
 
     return NextResponse.json({ data: computeAggregate(repos, days) });
   } catch (error) {

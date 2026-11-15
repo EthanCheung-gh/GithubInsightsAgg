@@ -3,18 +3,38 @@ import type { ReactNode } from 'react';
 
 import { ModeBadge } from '@/components/layout/ModeBadge';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { TokenPanel } from '@/components/settings/TokenPanel';
 import { Card } from '@/components/ui/Card';
 import { SyncButton } from '@/components/ui/SyncButton';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
 import { SyncRunTable } from '@/components/dashboard/SyncRunTable';
 import { dbPath } from '@/lib/db';
 import { num, relTime } from '@/lib/format';
+import { deviceFlowAvailable } from '@/lib/github';
 import { getRateLimitInfo, resolveToken } from '@/lib/github/client';
+import type { TokenSource } from '@/lib/github/types';
 import { countRepos, lastSyncedAt } from '@/lib/repo-store';
+import { maskToken } from '@/lib/settings-store';
 import { listSyncRuns } from '@/lib/sync-store';
 import { effectiveMode } from '@/lib/sync';
 
 export const dynamic = 'force-dynamic';
+
+/** Token 来源的中文标签（与 `/api/auth/token` 的 `sourceLabel` 保持一致）。 */
+const TOKEN_SOURCE_LABEL: Record<TokenSource, string> = {
+  env: '环境变量',
+  stored: '应用内保存',
+  'gh-cli': 'gh CLI',
+  none: '未配置',
+};
+
+/**
+ * Token 相关外链。
+ * 与 `src/app/api/auth/token/route.ts` 中的常量保持一致（该文件不导出常量，避免 route 模块被页面 import）。
+ */
+const TOKEN_SETTING_URL = 'https://github.com/settings/tokens';
+const TOKEN_CREATE_URL =
+  'https://github.com/settings/tokens/new?scopes=repo,read:org&description=GithubInsightsAgg';
 
 export const metadata: Metadata = {
   title: '设置 · GithubInsightsAgg',
@@ -45,10 +65,23 @@ export default async function SettingsPage() {
 
   const tokenLabel =
     token.source === 'env'
-      ? '已配置（来自环境变量）'
-      : token.source === 'gh-cli'
-        ? '已配置（来自 gh CLI）'
-        : '未配置';
+      ? '已配置（环境变量）'
+      : token.source === 'stored'
+        ? '已配置（应用内保存）'
+        : token.source === 'gh-cli'
+          ? '已配置（gh CLI）'
+          : '未配置';
+
+  const tokenInitial = {
+    configured: token.token !== null,
+    source: token.source,
+    sourceLabel: TOKEN_SOURCE_LABEL[token.source],
+    maskedToken: token.token ? maskToken(token.token) : null,
+    canClear: token.source === 'stored',
+    deviceFlowAvailable: deviceFlowAvailable(),
+    createTokenUrl: TOKEN_CREATE_URL,
+    settingUrl: TOKEN_SETTING_URL,
+  };
 
   return (
     <div className="flex flex-col gap-5">
@@ -58,13 +91,17 @@ export default async function SettingsPage() {
         actions={<ThemeToggle />}
       />
 
+      <Card title="GitHub Token" subtitle="用于采集 Traffic 等需要权限的数据">
+        <TokenPanel initial={tokenInitial} />
+      </Card>
+
       <Card title="运行状态" subtitle="服务端实时读取，不写入任何数据">
         <dl className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           <StatusItem label="数据模式">
             <ModeBadge mode={mode} />
           </StatusItem>
 
-          <StatusItem label="GitHub Token">
+          <StatusItem label="Token 来源">
             <span className={token.token ? 'text-success' : 'text-warn'}>{tokenLabel}</span>
           </StatusItem>
 

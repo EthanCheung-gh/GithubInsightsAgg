@@ -152,3 +152,11 @@ CREATE TABLE IF NOT EXISTS sync_runs (
   mode            TEXT NOT NULL DEFAULT 'live',   -- 'live' | 'demo'
   error           TEXT
 );
+
+-- 应用级键值设置（如应用内获取/手动填写的 GitHub Token）。
+-- 幂等新增，不影响上面 13 张已有表及其数据。
+CREATE TABLE IF NOT EXISTS app_settings (
+  key        TEXT PRIMARY KEY,
+  value      TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);

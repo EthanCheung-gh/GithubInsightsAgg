@@ -9,4 +9,13 @@ export { fetchTraffic } from './collectors/traffic';
 export { fetchActivity } from './collectors/activity';
 export { fetchIssuesAndPrs } from './collectors/issues';
 export { fetchOverview } from './collectors/overview';
+export {
+  DEVICE_FLOW_SCOPES,
+  GithubOAuthError,
+  deviceFlowAvailable,
+  getOAuthClientId,
+  pollDeviceFlow,
+  startDeviceFlow,
+} from './oauth';
+export type { DeviceCodeResult, PollResult } from './oauth';
 export type * from './types';

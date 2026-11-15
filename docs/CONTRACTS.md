@@ -25,12 +25,25 @@
 
 ```
 DATABASE_URL="file:./data/insights.db"   # 相对仓库根；目录不存在时自动创建
-GITHUB_TOKEN=""                          # 可选，空则回退 gh auth token，再回退演示数据
+GITHUB_TOKEN=""                          # 可选，空则回退应用内保存的 Token / gh auth token，再回退演示数据
 GITHUB_MIN_INTERVAL_MS="80"              # 采集节流，默认 80ms
+GITHUB_OAUTH_CLIENT_ID=""                # 可选，OAuth App 的 Client ID，用于应用内 Device Flow 一键授权
 ```
 
 - Token 只在服务端读取，`NEXT_PUBLIC_*` 绝不承载 Token。
 - 未获得 Token 时 `mode = 'demo'`，一切 UI 与 API 必须照常工作，数据由 `src/lib/demo.ts` 确定性生成。
+- **Token 解析顺序**（`resolveToken()`，`src/lib/github/client.ts` 唯一实现）：
+
+  ```
+  GITHUB_TOKEN / GH_TOKEN（source = 'env'）
+    → 应用内保存：app_settings.github_token（source = 'stored'）
+    → gh auth token（source = 'gh-cli'）
+    → 无（source = 'none'，mode = 'demo'）
+  ```
+
+  前两者每次现读，写入后立即生效；`gh auth token` 的结果在进程内缓存，设置/清除 Token 后由 `resetTokenCaches()` 失效重试。
+- `GITHUB_OAUTH_CLIENT_ID`：OAuth App 的 Client ID，用于应用内「一键连接 GitHub」（Device Flow）。**只需 Client ID，不需要 Client Secret**。未配置时 `deviceFlowAvailable = false`，设置页自动降级为「手动填写 Token」。
+- **Token 存储与安全**：应用内保存的 Token 以**明文**存放在本地 SQLite 的 `app_settings` 表，仅服务端可读；任何 HTTP 响应只返回 `maskToken()` 之后的掩码（如 `ghp_…mnop`），日志与错误信息中不得出现明文。共享机器 / 多人环境建议改用环境变量，并且不要把 `data/` 目录共享出去。
 
 ## 3. 文件归属（写权限边界，严禁跨界写文件）
 
@@ -47,6 +60,10 @@ GITHUB_MIN_INTERVAL_MS="80"              # 采集节流，默认 80ms
 只读引用他人文件是允许且必要的。`src/lib/types.ts` 由 WP1 落地，任何人不得修改，只能引用。
 
 ## 4. 数据库表结构（`db/schema.sql` 全文，WP1 逐字落地）
+
+当前 schema 共 **14 张表**：`repos` `repo_stat_snapshots` `traffic_daily` `traffic_referrers` `traffic_paths`
+`contributors` `commit_days` `participation_weeks` `issue_pr_daily` `releases` `repo_languages`
+`community_profiles` `sync_runs` `app_settings`。
 
 ```sql
 PRAGMA journal_mode = WAL;
@@ -202,6 +219,14 @@ CREATE TABLE IF NOT EXISTS sync_runs (
   records_written INTEGER NOT NULL DEFAULT 0,
   mode            TEXT NOT NULL DEFAULT 'live',   -- 'live' | 'demo'
   error           TEXT
+);
+
+-- 应用级键值设置（如应用内获取/手动填写的 GitHub Token）。
+-- 幂等新增，不影响上面 13 张已有表及其数据。
+CREATE TABLE IF NOT EXISTS app_settings (
+  key        TEXT PRIMARY KEY,
+  value      TEXT NOT NULL,
+  updated_at TEXT NOT NULL
 );
 ```
 
@@ -432,7 +457,7 @@ export interface HealthPayload {
   mode: DataMode;
   tokenConfigured: boolean;
   tokenSource: 'env' | 'none';
-  tokenSourceDetail?: 'env' | 'gh-cli' | 'none'; // 增补 A4：Token 的确切来源
+  tokenSourceDetail?: 'env' | 'stored' | 'gh-cli' | 'none'; // 增补 A4 / A5：Token 的确切来源（含应用内保存）
   repoCount: number;
   enabledRepoCount: number;
   lastSyncAt: string | null;
@@ -484,6 +509,59 @@ export interface ApiError { error: string; detail?: string; }
 - `repos` 省略 → 全部 `enabled` 仓库；空结果时 `overall.repos = 0`
 → `{ data: AggregateMetrics }`
 
+### Token 管理（应用内获取 / 粘贴 / 清除）
+
+四个 handler 全部 `runtime = 'nodejs'` + `dynamic = 'force-dynamic'`，所有响应只出现掩码（`maskToken()`），
+日志与错误信息不得出现 Token 明文。
+
+#### `GET /api/auth/token`
+→
+```ts
+{
+  configured: boolean;
+  source: 'env' | 'stored' | 'gh-cli' | 'none';
+  sourceLabel: string;          // '环境变量' | '应用内保存' | 'gh CLI' | '未配置'
+  maskedToken: string | null;
+  canClear: boolean;            // === (source === 'stored')
+  deviceFlowAvailable: boolean; // GITHUB_OAUTH_CLIENT_ID 是否已配置
+  settingUrl: string;           // https://github.com/settings/tokens
+  createTokenUrl: string;       // 已预填 scope=repo,read:org 的创建链接
+}
+```
+只读：**不发起任何 GitHub 请求**（`resolveToken()` 仅读 env / SQLite / 本地 `gh auth token`）。
+
+#### `POST /api/auth/token`
+请求体 `{ "token": string }`
+- 先用该 Token 调 GitHub `GET /user` 校验；通过后写入 `app_settings.github_token`，并 `resetTokenCaches()`
+- `200 { ok: true, login, scopes: string[], maskedToken, source: 'stored' }`
+- schema 校验失败 / GitHub 返回 401 → `400 { error: 'invalid_token', detail }`
+- 其他异常（网络、5xx）→ `500 { error: 'internal_error', detail }`
+
+#### `DELETE /api/auth/token`
+- `200 { ok: true }`（删除 `app_settings.github_token` 并 `resetTokenCaches()`）
+- Token 来自环境变量（应用内不可清除）→ `409 { error: 'token_from_env', detail }`
+- 没有应用内保存的 Token → `404 { error: 'no_stored_token' }`
+
+#### `POST /api/auth/device`
+发起 GitHub OAuth Device Flow（`scope = repo read:org`，只需 Client ID）
+- `200 { deviceCode, userCode, verificationUri, expiresIn, interval }`
+- 未配置 `GITHUB_OAUTH_CLIENT_ID` → `501 { error: 'device_flow_unavailable', detail }`
+- GitHub 侧错误 → 透传其状态码（无法归类时 `502`）+ `{ error, detail }`
+
+#### `GET /api/auth/device?deviceCode=xxx`
+轮询一次授权状态。**除参数错误外一律 200**，客户端按 `state` 分发：
+```ts
+{ state: 'pending' }
+{ state: 'slow_down'; interval: number }
+{ state: 'success'; login: string; scopes: string[]; maskedToken: string; source: 'stored' }
+{ state: 'error'; error: string; description: string }
+```
+- `success` 时服务端先 `validateToken()` 再落库（`app_settings.github_token`）并 `resetTokenCaches()`，响应只含掩码
+- `deviceCode` 缺失或长度非法 → `400 { error: 'invalid_body', detail }`
+
+客户端轮询约定（`TokenPanel`）：按 `interval` 秒轮询；`pending` 继续等待；`slow_down` 用返回的新 `interval` 继续；
+倒计时（`expiresIn`）归零即判定过期；取消或组件卸载必须清理定时器（`setInterval` / `setTimeout`）并 abort 在途请求。
+
 ## 7. 设计令牌（`globals.css`，WP4 落地；其他 WP 只使用类名与 CSS 变量）
 
 暗色为默认主题，`html[data-theme='light']` 覆盖为亮色。必须提供的 CSS 变量：
@@ -530,6 +608,23 @@ export function ThemeToggle(): JSX.Element
 export function SyncButton(p: { fullName?: string; label?: string; variant?: 'primary'|'ghost'; size?: 'sm'|'md' }): JSX.Element
 // AddRepoForm.tsx (客户端，POST /api/repos，成功后 router.refresh())
 export function AddRepoForm(p: { className?: string }): JSX.Element
+```
+
+`src/components/settings/`
+```ts
+// TokenPanel.tsx (客户端，设置页专用：Device Flow 一键授权 + 手动 Token + 清除)
+export function TokenPanel(p: {
+  initial: {
+    configured: boolean;
+    source: 'env' | 'stored' | 'gh-cli' | 'none';
+    sourceLabel: string;
+    maskedToken: string | null;
+    canClear: boolean;
+    deviceFlowAvailable: boolean;
+    createTokenUrl: string;
+    settingUrl: string;
+  };
+}): JSX.Element
 ```
 
 `src/components/layout/`

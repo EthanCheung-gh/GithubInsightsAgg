@@ -9,8 +9,8 @@ export interface RateLimitInfo {
   resetAt: string;
 }
 
-/** Token 实际来源：环境变量 / gh CLI / 无。 */
-export type TokenSource = 'env' | 'gh-cli' | 'none';
+/** Token 实际来源：环境变量 / 应用内保存（SQLite） / gh CLI / 无。 */
+export type TokenSource = 'env' | 'stored' | 'gh-cli' | 'none';
 
 export interface TokenResolution {
   token: string | null;

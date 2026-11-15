@@ -1,15 +1,10 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
 import { ensureBootstrapped } from '@/lib/bootstrap';
-import {
-  deleteRepo,
-  getRepoByFullName,
-  insertRepo,
-  listRepos,
-  normalizeFullName,
-} from '@/lib/repo-store';
+import { deleteRepo, getRepoByFullName, insertRepo, listRepos } from '@/lib/repo-store';
 import { syncRepo, effectiveMode } from '@/lib/sync';
 import type { DataMode } from '@/lib/types';
+import { formatZodError, repoCreateSchema } from '@/lib/validation';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -19,17 +14,6 @@ function internalError(error: unknown): NextResponse {
     { error: 'internal_error', detail: error instanceof Error ? error.message : String(error) },
     { status: 500 },
   );
-}
-
-/** 接受 `{ fullName }` 或 `{ owner, name }`，返回规范化全名或 null。 */
-function parseAddRepoBody(body: unknown): string | null {
-  if (!body || typeof body !== 'object') return null;
-  const record = body as Record<string, unknown>;
-  if (typeof record.fullName === 'string') return normalizeFullName(record.fullName);
-  if (typeof record.owner === 'string' && typeof record.name === 'string') {
-    return normalizeFullName(`${record.owner.trim()}/${record.name.trim()}`);
-  }
-  return null;
 }
 
 /** syncRepo 的返回值结构由 WP2 定义，这里做无类型假设的宽松读取。 */
@@ -62,10 +46,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       body = null;
     }
 
-    const fullName = parseAddRepoBody(body);
-    if (!fullName) {
-      return NextResponse.json({ error: 'invalid_full_name' }, { status: 400 });
+    const parsed = repoCreateSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: 'invalid_full_name', detail: formatZodError(parsed.error) },
+        { status: 400 },
+      );
     }
+    const { fullName } = parsed.data;
     if (getRepoByFullName(fullName)) {
       return NextResponse.json({ error: 'repo_exists' }, { status: 409 });
     }
