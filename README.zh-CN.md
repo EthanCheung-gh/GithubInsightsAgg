@@ -55,6 +55,14 @@ GithubInsightsAgg 是一个**自建、单进程、单用户**的 GitHub 数据�
 - 贡献者 Top 20（接口最多取前 100）与合计提交数。
 - 最忙星期（`busiestWeekday`）与日均提交数（`avgCommitsPerDay`）。
 
+### 代码量聚合统计（估算）
+
+- 估算代码行数：把 `/languages` 的每种语言字节数按语言系数（`LANGUAGE_BYTES_PER_LINE`）换算成行数。
+- 语言行数构成：按**估算行数**占比拆分（不是字节占比），并展示实际用到的加权字节/行，让估算依据可核查。
+- 逐周增删与累计净增曲线：来自 `stats/code_frequency`（近 52 周）。
+- 跨仓库代码规模对比：估算总行数、聚合语言构成与按规模排序的仓库榜。
+- **行数为估算**：GitHub 不提供真实 LOC，详见下文第 10 节与 [`docs/CONTRACTS.md` §9](docs/CONTRACTS.md)。
+
 ### Issues / PR 健康度
 
 - 逐日新开 / 关闭 Issue，新开 / 合并 / 关闭未合并 PR。
@@ -77,7 +85,7 @@ GithubInsightsAgg 是一个**自建、单进程、单用户**的 GitHub 数据�
 ### 规则化中文洞察
 
 - 每个仓库与聚合视图都会生成最多 6 条洞察，按严重程度排序（critical > warn > info > good）。
-- 覆盖：流量环比异动、克隆比例过高、来源集中、提交活跃度下滑、Issue 积压、社区档案缺失、Stars 增长、区间内零流量。
+- 覆盖：流量环比异动、克隆比例过高、来源集中、提交活跃度下滑、Issue 积压、社区档案缺失、Stars 增长、区间内零流量、代码规模收缩、技术栈单一、语言集中度高。
 
 ### 健康度评分
 
@@ -90,39 +98,45 @@ GithubInsightsAgg 是一个**自建、单进程、单用户**的 GitHub 数据�
 
 ### 总览
 
-跨仓库 KPI、访问量 / 克隆量与提交趋势、仓库排行榜、语言构成与规则化洞察。
+跨仓库 KPI、访问量 / 克隆量与提交趋势、仓库排行榜、语言构成、代码规模（估算）与规则化洞察。
 
-![](docs/screenshots/overview.png)
+![](docs/screenshots/overview.webp)
 
 ### 仓库详情 · 概览
 
 单个仓库的 Stars / Forks 趋势、语言构成、Release 节奏与社区健康清单。
 
-![](docs/screenshots/detail-overview.png)
+![](docs/screenshots/detail-overview.webp)
 
 ### 仓库详情 · 流量
 
 逐日访问量与克隆量、来源排行与热门页面。
 
-![](docs/screenshots/detail-traffic.png)
+![](docs/screenshots/detail-traffic.webp)
 
 ### 仓库详情 · 活跃度
 
 逐日提交曲线、星期分布、每周新增 / 删除行与贡献者排行。
 
-![](docs/screenshots/detail-activity.png)
+![](docs/screenshots/detail-activity.webp)
+
+### 仓库详情 · 代码量
+
+按语言拆分的估算代码行数、逐周新增 / 删除与累计净增曲线。
+
+![](docs/screenshots/detail-code.webp)
 
 ### 多仓库对比
 
 2~4 个仓库横向对比：指标矩阵、访问量 / 提交数 / 健康度对比图、流量对齐趋势与对比洞察。
 
-![](docs/screenshots/compare.png)
+![](docs/screenshots/compare.webp)
 
 ### 设置与 Token
 
 Token 来源与脱敏值、一键连接 GitHub（Device Flow）、手动填写入口，以及运行状态与同步记录诊断。
 
-![](docs/screenshots/settings-token.png)
+![](docs/screenshots/settings-token.webp)
 
 ## 4. 快速开始
 
@@ -236,9 +250,9 @@ GITHUB_TOKEN="ghp_xxx"
 
 | 路径 | 作用 |
 | --- | --- |
-| `/` | 总览：聚合 KPI、访问量 / 克隆量趋势、提交活跃度趋势、仓库排行、语言构成、跨仓洞察；顶部可切换 7 / 30 / 90 天 |
+| `/` | 总览：聚合 KPI、访问量 / 克隆量趋势、提交活跃度趋势、仓库排行、语言构成、代码规模（估算）与跨仓洞察；顶部可切换 7 / 30 / 90 天 |
 | `/repos` | 仓库管理：仓库列表、添加（`owner/name`）、启用 / 停用、单仓同步、删除（级联清空关联数据）、最近同步记录 |
-| `/repos/[owner]/[repo]` | 仓库详情，4 个 Tab：**概览**（Stars/Forks 趋势、语言、Release 节奏、社区健康清单）、**流量**（逐日访问与克隆、来源排行、热门页面）、**活跃度**（每日提交、周增删行、贡献者、最忙星期）、**Issues & PR**（逐日新开/关闭/合并、关闭率、合并率、积压）；支持区间切换与单仓重新同步 |
+| `/repos/[owner]/[repo]` | 仓库详情，5 个 Tab：**概览**（Stars/Forks 趋势、语言、Release 节奏、社区健康清单）、**流量**（逐日访问与克隆、来源排行、热门页面）、**活跃度**（每日提交、周增删行、贡献者、最忙星期）、**代码量**（按语言拆分的估算行数、逐周增删、累计净增）、**Issues & PR**（逐日新开/关闭/合并、关闭率、合并率、积压）；支持区间切换与单仓重新同步 |
 | `/compare` | 多仓对比：选择 2~4 个仓库，给出指标矩阵、访问量 / 提交数 / 健康度对比、流量对齐趋势与对比洞察；仓库不足时给出空态提示 |
 | `/settings` | 配置与诊断：GitHub Token 面板（一键 Device Flow 授权、手动粘贴、清除 Token）、Token 来源与当前模式、数据库路径、最近 20 次同步记录、采集范围说明、重新同步全部仓库 |
 
@@ -310,6 +324,21 @@ healthScore = round(0.30*traffic + 0.30*activity + 0.20*responsiveness + 0.20*co
 
 其中 `avgCloseHours` 无法获得时按 168 处理；聚合视图的 `overall.healthScore` 为各仓库 `healthScore` 按 `views` 加权平均（全部 `views` 为 0 时取算术平均）。
 
+### 代码量（估算）
+
+行数全部是**估算值**：GitHub 只提供每种语言的字节数（`/languages`）与每周增删（`stats/code_frequency`），不提供真实 LOC。
+
+- `lines = round(bytes / bytesPerLine(language))`，`bytesPerLine` 取自 `LANGUAGE_BYTES_PER_LINE`（34 项，未命中回退 34 字节/行）
+- `bytesPerLine`（加权）= `sum(bytes) / max(1, sum(lines))`，保留 1 位小数，并在 UI 上展示以透明化估算依据
+- `byLanguage[].percent` 是**估算行数**占比，不是字节占比（字节占比见 `overview.languages[].percent`），两者不可混用
+- `weekly[]`：`net = additions - deletions`，`cumulative` 沿 `weekStart` 滚动累加；该序列**不按 `days` 截断**（代码量是存量指标）
+- `last30d` 只保留 `weekStart >= today - (days - 1)` 的周（周粒度窗口，边界周整周计入）
+- `avgWeeklyNet` 固定取最近 52 周平均，与 `days` 无关
+- `peakWeek` 取 `|net|` 最大的周
+- 聚合页：`estimatedLines` 求和，`byLanguage` 按语言合并后重算 `percent`，`weekly` 按 `weekStart` 并集求和，`perRepo` 按 `estimatedLines` 降序
+
+完整系数表与单仓 / 聚合的逐条口径见 [`docs/CONTRACTS.md` §9](docs/CONTRACTS.md)。
+
 ## 11. 架构说明
 
 ```text
@@ -317,7 +346,7 @@ GithubInsightsAgg/
 ├── src/
 │   ├── app/          App Router：页面（总览 / 仓库 / 详情 / 对比 / 设置）与 REST API 路由
 │   ├── components/   UI 基础组件、图表封装、页面区块（客户端交互唯一入口）
-│   └── lib/          服务端核心：GitHub 客户端与采集器、写库、读库聚合、派生指标、洞察规则
+│   └── lib/          服务端核心：GitHub 客户端与采集器、写库、读库聚合、派生指标（含代码量估算）、洞察规则
 ├── db/               schema.sql（14 张表的唯一事实来源）
 ├── scripts/          运维脚本：db:migrate / sync（cron 采集）/ smoke（端到端自检）
 ├── docs/             设计与契约文档（PLAN、CONTRACTS、CONTRACTS-ADDENDUM）
@@ -336,9 +365,9 @@ GitHub REST v3 / GraphQL v4
         ↓
   SQLite（node:sqlite）· 14 张表
         ↓
-  src/lib/metrics-store.ts（只读，按区间查表）
+  src/lib/metrics-store.ts（只读，按区间查表；代码量曲线另读 `participation_weeks` 全量历史）
         ↓
-  src/lib/analytics.ts（派生指标 + healthScore）→ src/lib/insights.ts（规则引擎，中文洞察）
+  src/lib/analytics.ts（派生指标 + healthScore + 代码量估算）→ src/lib/insights.ts（规则引擎，中文洞察）
         ↓
   Server Component 页面 / REST API（/api/*）
 ```
@@ -369,6 +398,8 @@ GitHub REST v3 / GraphQL v4
 - **contributors 取前 100**：`/contributors?per_page=100` 只取一页，超大仓库的贡献者总数会偏小。
 - **Issue / PR 基于最近 100 条**：GraphQL 一次拉最近 100 条 issues 与 100 条 PR 在本地按日聚合，更早的历史不会进入 `issue_pr_daily`。
 - **`/stats/*` 可能「计算中」**：GitHub 未命中缓存时返回 202 + 空 body，采集会退避重试，仍失败则该组标记跳过，本次同步为 partial。
+- **行数为估算，且偏差方向不固定**：统一的字节/行系数会把压缩 / 生成产物（超长行）的行数**高估**，而系数表未登记、平均行更短的语言回退 34 字节/行时又会被**低估**。只能用于横向比较量级，不能当作精确 LOC。
+- **`code_frequency` 仅覆盖近 52 周且常返回 202**：GitHub 缓存未命中时返回 202 + 空 body，该组被跳过、这些周缺失，因此 `cumulative` 是相对 52 周的曲线，而不是仓库真实总行数。
 - **无 `avgCloseHours` 时按 168 小时估算**：响应度评分因此是近似值。
 - **本机 `gh` 已登录时不会进演示模式**：Token 解析链会拿到 `gh auth token`，此时空库不会自举演示仓库。
 - **单用户、无鉴权**：没有账号体系与多用户隔离，请勿直接暴露到公网。

@@ -57,6 +57,14 @@ Data lives in a local SQLite file (`node:sqlite`, no ORM). Pages and API are ser
 - Top contributors (the API returns up to 100; the UI lists the top 20) plus the total commit count.
 - Busiest weekday (`busiestWeekday`) and average commits per day (`avgCommitsPerDay`).
 
+### Code volume (estimated)
+
+- Estimated lines of code per repository: the per-language byte counts (`/languages`) converted with a per-language bytes-per-line coefficient (`LANGUAGE_BYTES_PER_LINE`).
+- Language breakdown by **estimated lines** (not bytes), plus the weighted bytes-per-line that was actually used, so the estimate stays transparent.
+- Weekly additions / deletions and a cumulative net-growth curve, driven by `stats/code_frequency` (last 52 weeks).
+- Cross-repo code-size comparison: total estimated lines, aggregate language mix and a repository leaderboard by estimated size.
+- **Every line count is an estimate** — GitHub exposes no real LOC figure. See section 10 below and [`docs/CONTRACTS.md` §9](docs/CONTRACTS.md).
+
 ### Issues / PR health
 
 - Per-day opened / closed issues, and opened / merged / closed-without-merge pull requests.
@@ -79,7 +87,7 @@ Data lives in a local SQLite file (`node:sqlite`, no ORM). Pages and API are ser
 ### Rule-based insights
 
 - Every repository, and the aggregate view, gets at most 6 insights sorted by severity (critical > warn > info > good).
-- Covers: traffic change vs the previous window, clone ratio too high, referrer concentration, falling commit activity, issue backlog, missing community files, star growth, zero traffic in the range.
+- Covers: traffic change vs the previous window, clone ratio too high, referrer concentration, falling commit activity, issue backlog, missing community files, star growth, zero traffic in the range, shrinking code size, a single-language stack, language concentration.
 - Text is generated in Simplified Chinese; the `level` and `metric` fields are stable, so clients can key off them instead of the prose.
 
 ### Health score
@@ -93,39 +101,45 @@ Every screenshot below is a full-page capture of a real running instance (demo d
 
 ### Overview dashboard
 
-Cross-repo KPIs, views / clones and commit trends, repository ranking, language mix and rule-based insights.
+Cross-repo KPIs, views / clones and commit trends, repository ranking, language mix, estimated code size and rule-based insights.
 
-![](docs/screenshots/overview.png)
+![](docs/screenshots/overview.webp)
 
 ### Repository detail — Overview tab
 
 Stars / forks trend, language mix, release cadence and the community health checklist of a single repository.
 
-![](docs/screenshots/detail-overview.png)
+![](docs/screenshots/detail-overview.webp)
 
 ### Repository detail — Traffic tab
 
 Daily views and clones, referrer ranking and popular paths.
 
-![](docs/screenshots/detail-traffic.png)
+![](docs/screenshots/detail-traffic.webp)
 
 ### Repository detail — Activity tab
 
 Daily commit curve, weekday distribution, weekly additions / deletions and the contributor ranking.
 
-![](docs/screenshots/detail-activity.png)
+![](docs/screenshots/detail-activity.webp)
+
+### Repository detail — Code tab
+
+Estimated lines of code by language, weekly additions / deletions and the cumulative net growth of a single repository.
+
+![](docs/screenshots/detail-code.webp)
 
 ### Compare
 
 Two to four repositories side by side: metric matrix, views / commits / health-score charts, traffic-aligned trend and comparison insights.
 
-![](docs/screenshots/compare.png)
+![](docs/screenshots/compare.webp)
 
 ### Settings and token
 
 Token source and masked value, one-click GitHub authorization (Device Flow), the manual paste entry, plus running status and sync history.
 
-![](docs/screenshots/settings-token.png)
+![](docs/screenshots/settings-token.webp)
 
 ## 4. Quick start
 
@@ -239,9 +253,9 @@ Each check prints `PASS` / `FAIL` / `SKIP`, a failure does not abort the run, an
 
 | Path | Purpose |
 | --- | --- |
-| `/` | Overview: aggregate KPIs, views / clones trend, commit-activity trend, repository leaderboard, language mix, cross-repo insights; 7 / 30 / 90-day switch in the header |
+| `/` | Overview: aggregate KPIs, views / clones trend, commit-activity trend, repository leaderboard, language mix, estimated code size and cross-repo insights; 7 / 30 / 90-day switch in the header |
 | `/repos` | Repository management: list, add (`owner/name`), enable / disable, single-repo sync, delete (cascades to all related data), recent sync runs |
-| `/repos/[owner]/[repo]` | Repository detail with 4 tabs: **Overview** (Stars/Forks trend, languages, release cadence, community checklist), **Traffic** (daily views and clones, referrer ranking, popular paths), **Activity** (daily commits, weekly additions/deletions, contributors, weekday distribution), **Issues & PR** (daily opened/closed/merged, close rate, merge rate, backlog); supports the day-range switch and re-syncing the repository |
+| `/repos/[owner]/[repo]` | Repository detail with 5 tabs: **Overview** (Stars/Forks trend, languages, release cadence, community checklist), **Traffic** (daily views and clones, referrer ranking, popular paths), **Activity** (daily commits, weekly additions/deletions, contributors, weekday distribution), **Code** (estimated lines per language, weekly additions/deletions, cumulative net growth), **Issues & PR** (daily opened/closed/merged, close rate, merge rate, backlog); supports the day-range switch and re-syncing the repository |
 | `/compare` | Multi-repo comparison: pick 2–4 repositories to get a metric matrix, views / commits / health-score comparison, traffic-aligned trend and comparison insights; shows an empty state when there are too few repositories |
 | `/settings` | Configuration and diagnostics: GitHub token panel (one-click device-flow authorization, manual token paste, clear token), token source and current mode, database path, the last 20 sync runs, an explanation of collection scope, and "re-sync all" |
 
@@ -313,6 +327,21 @@ healthScore = round(0.30*traffic + 0.30*activity + 0.20*responsiveness + 0.20*co
 
 `avgCloseHours` is treated as 168 hours when it cannot be obtained, so the responsiveness term is an estimate. The aggregate view's `overall.healthScore` is the `views`-weighted mean of the per-repo scores (arithmetic mean when every `views` is 0).
 
+### Code volume (estimated)
+
+Line counts are **estimates**: GitHub exposes only the byte count per language (`/languages`) and the weekly additions / deletions (`stats/code_frequency`), never a real LOC figure.
+
+- `lines = round(bytes / bytesPerLine(language))`, where `bytesPerLine` comes from `LANGUAGE_BYTES_PER_LINE` (34 entries, fallback `34` bytes per line)
+- `bytesPerLine` (weighted) `= sum(bytes) / max(1, sum(lines))`, rounded to one decimal — it is surfaced in the UI so the estimate stays auditable
+- `byLanguage[].percent` is the share of **estimated lines**, not of bytes (`overview.languages[].percent` is the byte share, and the two must not be mixed)
+- `weekly[]`: `net = additions - deletions`; `cumulative` is the rolling sum along `weekStart`, and the series is **not** truncated by `days` (code size is a stock metric)
+- `last30d` keeps the weeks with `weekStart >= today - (days - 1)` (week-granularity window, the boundary week counted in full)
+- `avgWeeklyNet` always averages the last 52 weeks, independent of `days`
+- `peakWeek` is the week with the largest `|net|`
+- Aggregate view: `estimatedLines` is summed, `byLanguage` is merged per language and `percent` recomputed from the merged line counts, `weekly` is summed over the union of `weekStart` values, `perRepo` is sorted by `estimatedLines` descending
+
+The full coefficient table and the per-repository / aggregate rules live in [`docs/CONTRACTS.md` §9](docs/CONTRACTS.md).
+
 ## 11. Architecture
 
 ```text
@@ -320,7 +349,7 @@ GithubInsightsAgg/
 ├── src/
 │   ├── app/          App Router: pages (overview / repos / detail / compare / settings) and REST API routes
 │   ├── components/   UI primitives, chart wrappers, page sections (the only client-side entry points)
-│   └── lib/          Server core: GitHub client and collectors, writers, read/aggregate layer, derived metrics, insight rules
+│   └── lib/          Server core: GitHub client and collectors, writers, read/aggregate layer, derived metrics (incl. estimated code volume), insight rules
 ├── db/               schema.sql (single source of truth for the 14 tables)
 ├── scripts/          Operational scripts: db:migrate / sync (cron collection) / smoke (end-to-end self-check)
 ├── docs/             Design and contract documents (PLAN, CONTRACTS, CONTRACTS-ADDENDUM)
@@ -339,9 +368,9 @@ GitHub REST v3 / GraphQL v4
         ↓
   SQLite (node:sqlite) · 14 tables
         ↓
-  src/lib/metrics-store.ts (read-only, range queries)
+  src/lib/metrics-store.ts (read-only, range queries; also reads the full `participation_weeks` history for the code-volume curve)
         ↓
-  src/lib/analytics.ts (derived metrics + healthScore) → src/lib/insights.ts (rule engine, Chinese text)
+  src/lib/analytics.ts (derived metrics + healthScore + estimated code volume) → src/lib/insights.ts (rule engine, Chinese text)
         ↓
   Server Component pages / REST API (/api/*)
 ```
@@ -372,6 +401,8 @@ Notes:
 - **Contributors limited to the first 100**: `/contributors?per_page=100` fetches one page, so the contributor total of very large repositories is understated.
 - **Issues / PRs limited to the latest 100 each**: GraphQL pulls the latest 100 issues and 100 PRs once, aggregated locally per day; older history never reaches `issue_pr_daily`.
 - **`/stats/*` may answer "computing"**: when GitHub's cache is cold it returns 202 with an empty body; collection backs off and retries, and if it still fails that section is skipped and the run is partial.
+- **Line counts are estimates and the bias has no fixed sign**: one bytes-per-line coefficient overstates minified / generated bundles (very long lines) while understating dense languages that are absent from `LANGUAGE_BYTES_PER_LINE` and fall back to 34 bytes per line. Use it to compare magnitudes, never as an exact LOC count.
+- **`code_frequency` covers only the last 52 weeks and often answers 202**: when GitHub's cache is cold the endpoint returns 202 with an empty body, that section is skipped and those weeks stay missing, so `cumulative` is a relative 52-week curve rather than the repository's real line count.
 - **`avgCloseHours` falls back to 168 hours**: the responsiveness term is therefore approximate.
 - **A logged-in `gh` on the machine disables demo mode**: the token chain finds `gh auth token`, so an empty database is not seeded with demo repositories.
 - **Single user, no authentication**: there are no accounts and no per-user isolation, so do not expose it to the public internet.

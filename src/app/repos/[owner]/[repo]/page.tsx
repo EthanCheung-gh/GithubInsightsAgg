@@ -12,12 +12,13 @@ import { RangeSwitch } from '@/components/metrics/RangeSwitch';
 import { OverviewPanel } from '@/components/metrics/OverviewPanel';
 import { TrafficPanel } from '@/components/metrics/TrafficPanel';
 import { ActivityPanel } from '@/components/metrics/ActivityPanel';
+import { CodePanel } from '@/components/metrics/CodePanel';
 import { IssuesPanel } from '@/components/metrics/IssuesPanel';
 
 export const dynamic = 'force-dynamic';
 
 const DAY_OPTIONS = [7, 30, 90];
-const TAB_KEYS = ['overview', 'traffic', 'activity', 'issues'] as const;
+const TAB_KEYS = ['overview', 'traffic', 'activity', 'code', 'issues'] as const;
 type TabKey = (typeof TAB_KEYS)[number];
 
 function parseDays(raw: string | undefined): number {
@@ -29,7 +30,7 @@ function parseTab(raw: string | undefined): TabKey {
   return TAB_KEYS.includes(raw as TabKey) ? (raw as TabKey) : 'overview';
 }
 
-/** 仓库详情：服务端驱动 4 个页签，`?tab=` / `?days=` 刷新后保持。 */
+/** 仓库详情：服务端驱动 5 个页签，`?tab=` / `?days=` 刷新后保持。 */
 export default async function RepoDetailPage({
   params,
   searchParams,
@@ -82,6 +83,7 @@ export default async function RepoDetailPage({
         {tab === 'overview' ? <OverviewPanel m={metrics} days={days} /> : null}
         {tab === 'traffic' ? <TrafficPanel m={metrics} /> : null}
         {tab === 'activity' ? <ActivityPanel m={metrics} days={days} /> : null}
+        {tab === 'code' ? <CodePanel m={metrics} /> : null}
         {tab === 'issues' ? <IssuesPanel m={metrics} /> : null}
       </div>
     </div>

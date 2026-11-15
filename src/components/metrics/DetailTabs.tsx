@@ -9,6 +9,7 @@ const DETAIL_TABS = [
   { key: 'overview', label: '概览' },
   { key: 'traffic', label: '流量' },
   { key: 'activity', label: '活跃度' },
+  { key: 'code', label: '代码量' },
   { key: 'issues', label: 'Issues & PR' },
 ];
 

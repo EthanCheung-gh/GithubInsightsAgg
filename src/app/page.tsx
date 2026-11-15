@@ -7,15 +7,17 @@ import { TrendChart } from '@/components/charts/TrendChart';
 import { ModeBadge } from '@/components/layout/ModeBadge';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Card } from '@/components/ui/Card';
+import { Badge } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { KpiCard } from '@/components/ui/KpiCard';
 import { SyncButton } from '@/components/ui/SyncButton';
 import { InsightList } from '@/components/dashboard/InsightList';
 import { RangeSwitch } from '@/components/dashboard/RangeSwitch';
 import { RepoRankTable } from '@/components/dashboard/RepoRankTable';
+import { signedNum } from '@/components/metrics/helpers';
 import { computeAggregate } from '@/lib/analytics';
 import { ensureBootstrapped } from '@/lib/bootstrap';
-import { compact, deltaPct, pct } from '@/lib/format';
+import { cn, compact, deltaPct, num, pct } from '@/lib/format';
 import { countRepos, listRepos } from '@/lib/repo-store';
 import { effectiveMode } from '@/lib/sync';
 
@@ -41,6 +43,13 @@ function healthTone(score: number): 'neutral' | 'good' | 'warn' | 'danger' {
   if (score >= 70) return 'good';
   if (score >= 45) return 'warn';
   return 'danger';
+}
+
+/** 净增行数的颜色：正绿、负红、零中性。 */
+function codeNetTone(net: number): string {
+  if (net > 0) return 'text-success';
+  if (net < 0) return 'text-danger';
+  return 'text-muted';
 }
 
 export default async function OverviewPage({
@@ -189,17 +198,53 @@ export default async function OverviewPage({
       </Card>
 
       {/* 聚合信息 */}
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-4 lg:grid-cols-3">
         <Card title="语言构成" subtitle={topLanguage ? `主力 ${topLanguage.language}` : '暂无语言数据'}>
           {topLanguage ? (
             <DonutChart
               height={240}
+              maxSlices={6}
               rows={agg.languageMix.map((item) => ({ label: item.language, value: item.bytes }))}
               centerValue={topLanguage.language}
               centerLabel="主力语言"
             />
           ) : (
             <EmptyState title="暂无语言数据" description="同步仓库后会按代码字节数统计语言构成。" />
+          )}
+        </Card>
+        <Card
+          title="代码规模"
+          subtitle={
+            <span className="inline-flex items-center gap-2">
+              按语言平均行长估算
+              <Badge tone="info">估算</Badge>
+            </span>
+          }
+        >
+          {agg.code.estimatedLines === 0 ? (
+            <EmptyState title="暂无代码量数据" description="同步仓库后会按语言字节数估算代码行数。" />
+          ) : (
+            <div className="flex flex-col gap-3">
+              <div className="flex items-baseline gap-2">
+                <span className="tabular text-[22px] font-semibold leading-none text-text">
+                  {compact(agg.code.estimatedLines)}
+                </span>
+                <span className="text-[11px] text-muted">估算行数</span>
+              </div>
+              <DonutChart
+                height={200}
+                maxSlices={6}
+                rows={agg.code.byLanguage.map((item) => ({ label: item.language, value: item.lines }))}
+                centerValue={num(agg.code.byLanguage.length)}
+                centerLabel="语言"
+              />
+              <div className="flex items-center justify-between gap-2 text-[11px]">
+                <span className="text-muted">近 {days} 天净增</span>
+                <span className={cn('tabular', codeNetTone(agg.code.last30d.net))}>
+                  {signedNum(agg.code.last30d.net)} 行
+                </span>
+              </div>
+            </div>
           )}
         </Card>
         <Card title="洞察" subtitle={`共 ${agg.insights.length} 条`}>

@@ -193,6 +193,41 @@ function buildSharedRules(ctx: RuleContext): RuleHit[] {
   return hits;
 }
 
+/** 代码量相关规则（估算口径，见 analytics.ts 的 computeCodeMetrics）。 */
+function buildCodeRules(m: Omit<RepoMetrics, 'insights'>, days: number): RuleHit[] {
+  const hits: RuleHit[] = [];
+  const code = m.code;
+
+  // 规则 9：代码规模收缩（近窗口净删占估算总量 ≥ 2%）
+  const net = code.last30d.net;
+  if (net < 0) {
+    const shrinkRate = Math.abs(net) / Math.max(1, code.estimatedLines);
+    if (shrinkRate >= 0.02) {
+      hits.push({
+        level: 'warn',
+        title: '代码规模收缩',
+        detail: `近 ${days} 天净删 ${fmtNum(Math.abs(net))} 行（估算总量的 ${pct(shrinkRate)}）`,
+        metric: 'code.last30d.net',
+        impact: shrinkRate * 100,
+      });
+    }
+  }
+
+  // 规则 10：技术栈单一（语言数 ≥ 3 但首位占估算行数 ≥ 85%）
+  const topLanguage = code.byLanguage[0];
+  if (code.byLanguage.length >= 3 && topLanguage && topLanguage.percent >= 0.85) {
+    hits.push({
+      level: 'info',
+      title: '技术栈单一',
+      detail: `${topLanguage.language} 占估算行数 ${pct(topLanguage.percent)}`,
+      metric: 'code.byLanguage',
+      impact: topLanguage.percent * 100,
+    });
+  }
+
+  return hits;
+}
+
 function finalize(hits: RuleHit[]): Insight[] {
   return [...hits]
     .sort((a, b) => LEVEL_ORDER[a.level] - LEVEL_ORDER[b.level] || b.impact - a.impact)
@@ -233,6 +268,7 @@ export function buildRepoInsights(m: Omit<RepoMetrics, 'insights'>, days: number
     referrers: m.traffic.referrers,
     includeZeroTraffic: true,
   });
+  hits.push(...buildCodeRules(m, windowDays));
   return finalize(hits);
 }
 
@@ -295,6 +331,18 @@ export function buildAggregateInsights(
         impact: gap,
       });
     }
+  }
+
+  // 聚合补充 3：语言集中度（首位语言占估算行数 ≥ 60%）
+  const topCodeLanguage = a.code.byLanguage[0];
+  if (topCodeLanguage && topCodeLanguage.percent >= 0.6) {
+    hits.push({
+      level: 'info',
+      title: '语言集中度高',
+      detail: `全部仓库中 ${topCodeLanguage.language} 占估算行数 ${pct(topCodeLanguage.percent)}`,
+      metric: 'code.byLanguage',
+      impact: topCodeLanguage.percent * 100,
+    });
   }
 
   return finalize(hits);

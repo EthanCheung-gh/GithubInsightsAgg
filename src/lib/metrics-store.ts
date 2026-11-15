@@ -187,6 +187,28 @@ export function getParticipationWeeks(repoId: number, weeks: number): Participat
   }));
 }
 
+/**
+ * 全量周参与度（不设 LIMIT），按 week_start 升序。
+ *
+ * 代码量统计需要完整时间轴来算累计净增曲线，因此不能复用 `getParticipationWeeks`
+ * 的「近 N 周」截断语义。
+ */
+export function getAllParticipationWeeks(repoId: number): ParticipationWeekRow[] {
+  const rows = all<ParticipationRow>(
+    `SELECT week_start, commits, additions, deletions
+       FROM participation_weeks
+      WHERE repo_id = ?
+      ORDER BY week_start ASC`,
+    [repoId],
+  );
+  return rows.map((row) => ({
+    weekStart: row.week_start,
+    commits: toInt(row.commits),
+    additions: toInt(row.additions),
+    deletions: toInt(row.deletions),
+  }));
+}
+
 interface ContributorDbRow {
   login: string;
   avatar_url: string | null;

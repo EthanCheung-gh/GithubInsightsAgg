@@ -98,6 +98,41 @@ export interface LanguageShare {
   percent: number;
 }
 
+/** 语言维度的代码量估算：GitHub 只给字节数，行数由系数换算，属估算值。 */
+export interface CodeLanguageStat {
+  language: string;
+  bytes: number;
+  lines: number;
+  percent: number; // 按估算行数占比，0~1
+}
+
+/** 周维度的代码净增。deletions 为正数（绝对值）。 */
+export interface CodeWeekPoint {
+  weekStart: string;
+  additions: number;
+  deletions: number;
+  net: number;
+  cumulative: number; // 该仓库时间轴上累计净增行数
+}
+
+export interface CodeDeltaTotals {
+  additions: number;
+  deletions: number;
+  net: number;
+}
+
+/** 代码量统计。estimatedLines / lines / percent 均为估算值。 */
+export interface CodeMetrics {
+  estimatedLines: number;
+  bytesPerLine: number; // 加权平均字节/行，透明化估算依据
+  isEstimated: true;
+  byLanguage: CodeLanguageStat[];
+  weekly: CodeWeekPoint[];
+  last30d: CodeDeltaTotals;
+  avgWeeklyNet: number;
+  peakWeek: CodeWeekPoint | null;
+}
+
 export interface ReleaseRow {
   tagName: string;
   name: string | null;
@@ -136,6 +171,7 @@ export interface RepoMetrics {
     contributors: ContributorRow[];
     busiestWeekday: string | null;
   };
+  code: CodeMetrics;
   issues: {
     daily: IssuePrPoint[];
     totals: { issuesOpened: number; issuesClosed: number; prOpened: number; prMerged: number; prClosed: number };
@@ -194,6 +230,14 @@ export interface AggregateMetrics {
   };
   previous: { views: number; clones: number; commits: number; stars: number };
   trend: { date: string; views: number; clones: number; commits: number }[];
+  code: {
+    estimatedLines: number;
+    isEstimated: true;
+    last30d: CodeDeltaTotals;
+    byLanguage: CodeLanguageStat[];
+    weekly: { weekStart: string; additions: number; deletions: number; net: number }[];
+    perRepo: { fullName: string; estimatedLines: number; net30d: number }[];
+  };
   perRepo: RepoRankRow[];
   languageMix: LanguageShare[];
   insights: Insight[];

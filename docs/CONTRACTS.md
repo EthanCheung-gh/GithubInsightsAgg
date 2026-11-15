@@ -335,6 +335,41 @@ export interface LanguageShare {
   percent: number;
 }
 
+/** 语言维度的代码量估算：GitHub 只给字节数，行数由系数换算，属估算值。 */
+export interface CodeLanguageStat {
+  language: string;
+  bytes: number;
+  lines: number;
+  percent: number; // 按估算行数占比，0~1
+}
+
+/** 周维度的代码净增。deletions 为正数（绝对值）。 */
+export interface CodeWeekPoint {
+  weekStart: string;
+  additions: number;
+  deletions: number;
+  net: number;
+  cumulative: number; // 该仓库时间轴上累计净增行数
+}
+
+export interface CodeDeltaTotals {
+  additions: number;
+  deletions: number;
+  net: number;
+}
+
+/** 代码量统计。estimatedLines / lines / percent 均为估算值。 */
+export interface CodeMetrics {
+  estimatedLines: number;
+  bytesPerLine: number; // 加权平均字节/行，透明化估算依据
+  isEstimated: true;
+  byLanguage: CodeLanguageStat[];
+  weekly: CodeWeekPoint[];
+  last30d: CodeDeltaTotals;
+  avgWeeklyNet: number;
+  peakWeek: CodeWeekPoint | null;
+}
+
 export interface ReleaseRow {
   tagName: string;
   name: string | null;
@@ -373,6 +408,7 @@ export interface RepoMetrics {
     contributors: ContributorRow[];
     busiestWeekday: string | null;
   };
+  code: CodeMetrics;
   issues: {
     daily: IssuePrPoint[];
     totals: { issuesOpened: number; issuesClosed: number; prOpened: number; prMerged: number; prClosed: number };
@@ -431,6 +467,14 @@ export interface AggregateMetrics {
   };
   previous: { views: number; clones: number; commits: number; stars: number };
   trend: { date: string; views: number; clones: number; commits: number }[];
+  code: {
+    estimatedLines: number;
+    isEstimated: true;
+    last30d: CodeDeltaTotals;
+    byLanguage: CodeLanguageStat[];
+    weekly: { weekStart: string; additions: number; deletions: number; net: number }[];
+    perRepo: { fullName: string; estimatedLines: number; net30d: number }[];
+  };
   perRepo: RepoRankRow[];
   languageMix: LanguageShare[];
   insights: Insight[];
@@ -637,6 +681,22 @@ export function TokenPanel(p: {
 }): JSX.Element
 ```
 
+`src/components/metrics/`（页面区块；需要排序 / 交互的组件为客户端组件）
+```ts
+// CodePanel.tsx（服务端组件：仓库详情「代码量」页签，含 5 个 KPI + 语言构成 / 明细 + 累计净增 / 每周增删）
+export function CodePanel(p: { m: RepoMetrics }): JSX.Element
+// CodeLanguageTable.tsx（客户端包装：columns[].render 不能跨 RSC 边界）
+export function CodeLanguageTable(p: { rows: CodeLanguageStat[] }): JSX.Element
+// DetailTabs.tsx（客户端：5 个页签 overview / traffic / activity / code / issues，切页签只改 ?tab=）
+export function DetailTabs(p: { value: string }): JSX.Element
+// CompareMatrix.tsx（客户端：传入 codeByRepo 时在 Stars 增量后插入「估算行数」「近 N 天净增」两列）
+export function CompareMatrix(p: {
+  rows: RepoRankRow[];
+  codeByRepo?: Record<string, { estimatedLines: number; net30d: number }>;
+  days?: number;
+}): JSX.Element
+```
+
 `src/components/layout/`
 ```ts
 export function AppShell(p: { children: React.ReactNode }): JSX.Element   // 侧边栏 + 顶栏 + 内容区
@@ -704,6 +764,77 @@ export const api = {
   ```
   其中 `avgCloseHours` 无法获得时按 168 处理。聚合页 `overall.healthScore` 为各仓库 `healthScore` 的按 `views` 加权平均（全部 views 为 0 时取算术平均）。
 
+### 代码量（估算）
+
+> **本节所有行数都是估算值，不是真实 LOC。** GitHub 不提供 `cloc` / `tokei` 级别的代码行数，只有两条原始数据：
+> `repo_languages` 的**每种语言字节数**，与 `participation_weeks`（来源 `stats/code_frequency`）的**每周增删行数**。
+> 行数由「每行平均字节数」系数换算，`CodeMetrics.isEstimated` 恒为 `true`，UI 与文档必须标注「估算」。
+
+**单仓口径（`computeCodeMetrics()`）**
+
+- `lines = round(bytes / bytesPerLine(language))`；`bytes <= 0` 或非法 → `0`，`bytesPerLine` 至少取 1（避免除零）。
+- `bytesPerLine(language)`：先精确匹配 `LANGUAGE_BYTES_PER_LINE`（保留 `C++` / `C#` 这类含符号键），再按小写归一匹配，未命中回退 `DEFAULT_BYTES_PER_LINE = 34`。
+- 系数表（`src/lib/analytics.ts` 的 `LANGUAGE_BYTES_PER_LINE`，共 34 项；未列出的语言一律按 34 处理）：
+
+| 语言 | bytesPerLine |
+| --- | --- |
+| TypeScript | 32 |
+| JavaScript | 32 |
+| Python | 38 |
+| Go | 30 |
+| Rust | 34 |
+| Java | 36 |
+| Kotlin | 34 |
+| C | 30 |
+| C++ | 32 |
+| C# | 34 |
+| Ruby | 30 |
+| PHP | 32 |
+| Swift | 30 |
+| Dart | 32 |
+| Scala | 34 |
+| Shell | 30 |
+| PowerShell | 32 |
+| CSS | 26 |
+| SCSS | 26 |
+| HTML | 30 |
+| Vue | 32 |
+| Svelte | 32 |
+| SQL | 38 |
+| Markdown | 45 |
+| JSON | 30 |
+| YAML | 30 |
+| Dockerfile | 26 |
+| Makefile | 28 |
+| Nix | 30 |
+| Lua | 30 |
+| Elixir | 32 |
+| Haskell | 32 |
+| Zig | 32 |
+| Solidity | 34 |
+
+- `CodeMetrics.bytesPerLine`（加权）= `sum(bytes) / max(1, sum(lines))`，保留 **1 位小数**；用于在 UI 上透明化「这次估算实际落在多少字节/行」。
+- `CodeLanguageStat.percent` 按**估算行数**占比：`lines / max(1, sum(lines))`，保留 6 位小数。**不是字节占比**——`overview.languages[].percent` 才是字节占比，两者不可混用。
+- `byLanguage` 排序：`lines` 降序 → `bytes` 降序 → 语言名字典序；`lines = 0` 的语言保留在列表尾部（说明是小文件）。
+- `weekly`：`net = additions - deletions`（`deletions` 为正数/绝对值），`cumulative` 为按 `weekStart` 升序的滚动累加。**不按 `days` 截断**：代码量是存量指标，`days` 只影响 `last30d`；`weekly` 取 `getAllParticipationWeeks()` 返回的全部周。
+- `last30d`：**周粒度窗口**，只累加满足 `weekStart >= today - (days - 1)` 的周（含当前周，边界周整周计入）。字段名沿用 `last30d`，但内容随 `days` 变化。
+- `avgWeeklyNet`：固定取**最近 52 周**（`weekly.slice(-52)`）的 `net` 平均值，保留 1 位小数，**与 `days` 无关**。
+- `peakWeek`：`|net|` 最大的周（净删最多的周也算峰值），无周数据 → `null`。
+
+**聚合口径（`AggregateMetrics.code`，`mergeCode()`）**
+
+- `estimatedLines`：各仓库 `code.estimatedLines` 求和。
+- `byLanguage`：按语言合并 `bytes` / `lines`，再用合并后的 `estimatedLines` **重算 `percent`**；排序规则与单仓一致。
+- `weekly`：按 `weekStart` 取**并集**求和（`additions` / `deletions` / `net` 各仓相加，升序输出；聚合层不再给出 `cumulative`）。
+- `last30d`：各仓库 `code.last30d` 求和。
+- `perRepo`：`{ fullName, estimatedLines, net30d }`，按 `estimatedLines` 降序（同值按 `fullName` 字典序）。
+
+**估算偏差与数据限制**
+
+- 压缩 / 生成产物（minified bundle、打包后的 JSON、lock 文件）行宽极大，按固定系数换算会**高估**这类文件的行数，并稀释手写代码的真实占比；反之，未登记在系数表里、平均行长明显短于 34 字节的语言会回退到 34，从而被**低估**。偏差方向不确定，只能用于把握量级。
+- `code_frequency` 只覆盖**最近 52 周**，且 GitHub 侧缓存未命中时常返回 **202 + 空 body**；该次采集被跳过时 `weekly` 会缺周。因此 `cumulative` 既不是「仓库历史总行数」，也与 `estimatedLines`（当前字节快照）**不同基准**，两者不可相减。
+- 语言字节数来自 `repo_languages`（GitHub 的语言识别，vendored / generated 目录同样计入），与 `.gitignore` 无关。
+
 ## 10. 洞察规则（WP3 `insights.ts`，中文输出，最多 6 条，按 level 排序 critical>warn>info>good）
 
 必须实现以下规则，阈值可微调但语义不得改变：
@@ -715,6 +846,11 @@ export const api = {
 6. 社区健康：`healthPercentage < 100` → info，列出缺失项
 7. Stars 增长：`starDelta > 0` → good
 8. 最近 `days` 天零流量 → warn「近 N 天无访问记录（可能未公开）」
+9. 代码规模收缩（单仓，`buildCodeRules()`）：`code.last30d.net < 0` 且收缩率 `|net| / max(1, code.estimatedLines) >= 0.02` → warn「代码规模收缩」，detail `近 {days} 天净删 {N} 行（估算总量的 {pct}）`，metric `code.last30d.net`，impact = 收缩率 × 100
+10. 技术栈单一（单仓，`buildCodeRules()`）：`code.byLanguage.length >= 3` 且首位语言 `percent >= 0.85` → info「技术栈单一」，detail `{语言} 占估算行数 {pct}`，metric `code.byLanguage`，impact = 占比 × 100
+11. 语言集中度高（**仅聚合**，`buildAggregateInsights()`）：`code.byLanguage[0].percent >= 0.6` → info「语言集中度高」，detail `全部仓库中 {语言} 占估算行数 {pct}`，metric `code.byLanguage`，impact = 占比 × 100
+
+> 规则 9~11 的分母都是**估算行数**（见 §9「代码量（估算）」），文案与 UI 必须保留「估算」措辞。规则 3 / 5 / 6 只在单仓层产出，规则 11 只在聚合层产出；单仓与聚合各自最多 6 条。
 
 ## 11. Next.js 16 硬性注意
 

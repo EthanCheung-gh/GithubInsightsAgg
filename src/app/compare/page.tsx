@@ -139,6 +139,12 @@ export default async function ComparePage({
     hint: `访问 ${compact(row.views)} · 合并率 ${num(Math.round(row.mergeRate * 1000) / 10)}%`,
   }));
 
+  // 代码量按仓库聚合（`RepoRankRow` 不含这些字段）：组装成 map 传给客户端矩阵
+  const codeByRepo: Record<string, { estimatedLines: number; net30d: number }> = {};
+  for (const item of agg.code.perRepo) {
+    codeByRepo[item.fullName] = { estimatedLines: item.estimatedLines, net30d: item.net30d };
+  }
+
   return (
     <div className="flex flex-col">
       {header}
@@ -168,7 +174,7 @@ export default async function ComparePage({
         ) : null}
 
         <Card title="指标矩阵" subtitle={`近 ${days} 天`}>
-          <CompareMatrix rows={agg.perRepo} />
+          <CompareMatrix rows={agg.perRepo} codeByRepo={codeByRepo} days={days} />
         </Card>
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
