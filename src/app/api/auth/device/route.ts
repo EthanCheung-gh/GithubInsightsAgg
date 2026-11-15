@@ -68,11 +68,17 @@ export async function POST(): Promise<NextResponse> {
  * 轮询语义一律用 HTTP 200 表达，避免前端把「还在等用户点授权」当成网络错误：
  * - `pending` / `slow_down` / `error` 直接透传；
  * - `success` 先 `validateToken()` 再落库，响应里只有脱敏 Token。
+ *
+ * `?interval=` 是调用方当前使用的轮询间隔：GitHub 的 `slow_down` 响应体通常不带 `interval`，
+ * 必须由调用方回传当前值，服务端才能返回递增后的新间隔（10 → 15 → 20 …）。
  */
 export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
     const { searchParams } = new URL(request.url);
-    const parsed = devicePollSchema.safeParse({ deviceCode: searchParams.get('deviceCode') });
+    const parsed = devicePollSchema.safeParse({
+      deviceCode: searchParams.get('deviceCode'),
+      interval: searchParams.get('interval'),
+    });
     if (!parsed.success) {
       return NextResponse.json(
         { error: 'invalid_body', detail: formatZodError(parsed.error) },
@@ -80,7 +86,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    const result = await pollDeviceFlow(parsed.data.deviceCode);
+    const result = await pollDeviceFlow(parsed.data.deviceCode, parsed.data.interval);
     if (result.state !== 'success') return NextResponse.json(result);
 
     const token = result.token.trim();

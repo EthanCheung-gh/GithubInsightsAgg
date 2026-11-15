@@ -7,7 +7,7 @@ import {
   validateToken,
 } from '@/lib/github';
 import type { TokenSource } from '@/lib/github';
-import { clearStoredToken, maskToken, setStoredToken } from '@/lib/settings-store';
+import { clearStoredToken, getStoredToken, maskToken, setStoredToken } from '@/lib/settings-store';
 import { formatZodError, tokenSetSchema } from '@/lib/validation';
 
 export const dynamic = 'force-dynamic';
@@ -45,6 +45,21 @@ async function readJsonBody(request: NextRequest): Promise<unknown> {
 }
 
 /**
+ * 本地是否存有「应用内保存」的 Token（即 `DELETE` 能否清掉东西）。
+ *
+ * 不能用 `resolveToken().source === 'stored'` 判断：Token 的生效来源有优先级
+ * （env > stored > gh-cli），`/auth/token` 除 `DELETE` 外还有 `POST` 与 `device` 两条写入路径。
+ * 因此这里只看库里有没有值；DB 打不开时降级为 `false`，不让整个 `GET` 500。
+ */
+function hasStoredToken(): boolean {
+  try {
+    return getStoredToken() !== null;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * 当前 Token 状态（只读）。
  *
  * **不发起任何 GitHub 请求**：`resolveToken()` 只读 env / SQLite / 本地 `gh auth token`。
@@ -60,7 +75,7 @@ export async function GET(): Promise<NextResponse> {
       source: resolution.source,
       sourceLabel: SOURCE_LABELS[resolution.source],
       maskedToken: resolution.token ? maskToken(resolution.token) : null,
-      canClear: resolution.source === 'stored',
+      canClear: hasStoredToken(),
       deviceFlowAvailable: deviceFlowAvailable(),
       settingUrl: SETTING_URL,
       createTokenUrl: CREATE_TOKEN_URL,
@@ -117,14 +132,22 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 /**
  * 清除应用内保存的 Token。
  *
- * - Token 来自环境变量 → 409 `token_from_env`（改 env 后重启才生效）
- * - 没有应用内 Token → 404 `no_stored_token`
- * - 成功 → 200 `{ ok: true }`
+ * 分支顺序：**先清本地，清不到再按来源判定**。
+ * 这样「库里存在 stored token」时，无论当前生效来源是什么（例如 env 同时存在）都能被清掉，
+ * 与 `GET` 的 `canClear` 完全一致。
+ *
+ * - 清到一行 → 200 `{ ok: true }`（并 `resetTokenCaches()`）
+ * - 没清到任何东西且当前来源是环境变量 → 409 `token_from_env`（改 env 后重启才生效）
+ * - 没清到任何东西且来源不是环境变量 → 404 `no_stored_token`
  */
 export async function DELETE(): Promise<NextResponse> {
   try {
-    const resolution = resolveToken();
-    if (resolution.source === 'env') {
+    if (clearStoredToken()) {
+      resetTokenCaches();
+      return NextResponse.json({ ok: true });
+    }
+
+    if (resolveToken().source === 'env') {
       return NextResponse.json(
         {
           error: 'token_from_env',
@@ -134,12 +157,7 @@ export async function DELETE(): Promise<NextResponse> {
       );
     }
 
-    if (!clearStoredToken()) {
-      return NextResponse.json({ error: 'no_stored_token' }, { status: 404 });
-    }
-
-    resetTokenCaches();
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ error: 'no_stored_token' }, { status: 404 });
   } catch (error) {
     return internalError(error);
   }

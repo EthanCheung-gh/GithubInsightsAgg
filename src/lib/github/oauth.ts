@@ -21,6 +21,12 @@ export const DEVICE_FLOW_SCOPES = 'repo read:org';
 /** GitHub Device Flow 默认轮询间隔（秒），`slow_down` 时在此基础上加 5。 */
 const DEFAULT_INTERVAL_SECONDS = 5;
 
+/** `slow_down` 的间隔上限（秒）：按 RFC 8628 每次 +5，但不超过 60 秒。 */
+const MAX_INTERVAL_SECONDS = 60;
+
+/** `slow_down` 每次递增的秒数。 */
+const SLOW_DOWN_STEP_SECONDS = 5;
+
 /** Device Flow 相关错误（`code` 便于上层区分降级路径）。 */
 export class GithubOAuthError extends Error {
   readonly code: string;
@@ -231,14 +237,41 @@ export async function startDeviceFlow(): Promise<DeviceCodeResult> {
 }
 
 /**
+ * 计算 `slow_down` 之后的新轮询间隔。
+ *
+ * 该函数是纯函数，因为本模块无状态：GitHub 的 `slow_down` 响应体通常**不含** `interval`，
+ * 只有把「调用方当前的间隔」传进来，才能按规范递增（10 → 15 → 20 …）。
+ *
+ * 规则：`currentInterval + 5`；若响应体自带更大的 `interval` 则取两者最大值；
+ * 结果统一收敛到 1~60 秒。
+ */
+function nextSlowDownInterval(currentInterval: number | undefined, payloadInterval: unknown): number {
+  const base =
+    typeof currentInterval === 'number' && Number.isFinite(currentInterval)
+      ? currentInterval
+      : DEFAULT_INTERVAL_SECONDS;
+  let next = Math.floor(base) + SLOW_DOWN_STEP_SECONDS;
+
+  const fromPayload = asNumber(payloadInterval, 0);
+  if (fromPayload > next) next = fromPayload;
+
+  return Math.min(MAX_INTERVAL_SECONDS, Math.max(1, next));
+}
+
+/**
  * 轮询一次 Device Flow 状态。
  *
  * GitHub 语义：
  * - `authorization_pending` -> 继续按 interval 轮询；
- * - `slow_down` -> interval + 5 秒；
+ * - `slow_down` -> interval + 5 秒（上限 60 秒，需要调用方把当前间隔传进来才能累积）；
  * - `expired_token` / `access_denied` / 其他 -> error。
+ *
+ * @param currentInterval 调用方当前使用的轮询间隔（秒，可选）；仅在 `slow_down` 时参与计算。
  */
-export async function pollDeviceFlow(deviceCode: string): Promise<PollResult> {
+export async function pollDeviceFlow(
+  deviceCode: string,
+  currentInterval?: number,
+): Promise<PollResult> {
   const clientId = getOAuthClientId();
   if (!clientId) {
     return {
@@ -262,8 +295,7 @@ export async function pollDeviceFlow(deviceCode: string): Promise<PollResult> {
   const error = asString(payload.error);
   if (error === 'authorization_pending') return { state: 'pending' };
   if (error === 'slow_down') {
-    const current = asNumber(payload.interval, DEFAULT_INTERVAL_SECONDS);
-    return { state: 'slow_down', interval: current + 5 };
+    return { state: 'slow_down', interval: nextSlowDownInterval(currentInterval, payload.interval) };
   }
   if (error) {
     const normalized = normalizeOAuthError(

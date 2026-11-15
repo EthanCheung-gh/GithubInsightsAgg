@@ -522,13 +522,14 @@ export interface ApiError { error: string; detail?: string; }
   source: 'env' | 'stored' | 'gh-cli' | 'none';
   sourceLabel: string;          // '环境变量' | '应用内保存' | 'gh CLI' | '未配置'
   maskedToken: string | null;
-  canClear: boolean;            // === (source === 'stored')
+  canClear: boolean;            // 本地是否存在「应用内保存」的 Token（DB 读取失败时降级为 false）
   deviceFlowAvailable: boolean; // GITHUB_OAUTH_CLIENT_ID 是否已配置
   settingUrl: string;           // https://github.com/settings/tokens
   createTokenUrl: string;       // 已预填 scope=repo,read:org 的创建链接
 }
 ```
 只读：**不发起任何 GitHub 请求**（`resolveToken()` 仅读 env / SQLite / 本地 `gh auth token`）。
+`canClear` 只看「库里有没有应用内保存的 Token」，与 `source` 无关（`env` 同时存在时为 `true`，见 `DELETE`）。
 
 #### `POST /api/auth/token`
 请求体 `{ "token": string }`
@@ -538,9 +539,10 @@ export interface ApiError { error: string; detail?: string; }
 - 其他异常（网络、5xx）→ `500 { error: 'internal_error', detail }`
 
 #### `DELETE /api/auth/token`
-- `200 { ok: true }`（删除 `app_settings.github_token` 并 `resetTokenCaches()`）
-- Token 来自环境变量（应用内不可清除）→ `409 { error: 'token_from_env', detail }`
-- 没有应用内保存的 Token → `404 { error: 'no_stored_token' }`
+分支顺序固定为**先清本地，清不到再按来源判定**（这样「库里存在 stored token」时，无论当前生效来源是什么都能清掉，与 `canClear` 一致）：
+1. 删除 `app_settings.github_token` 成功 → `200 { ok: true }`（并 `resetTokenCaches()`）
+2. 没清到任何东西，且 `resolveToken().source === 'env'` → `409 { error: 'token_from_env', detail }`
+3. 没清到任何东西，其他来源 → `404 { error: 'no_stored_token' }`
 
 #### `POST /api/auth/device`
 发起 GitHub OAuth Device Flow（`scope = repo read:org`，只需 Client ID）
@@ -548,7 +550,10 @@ export interface ApiError { error: string; detail?: string; }
 - 未配置 `GITHUB_OAUTH_CLIENT_ID` → `501 { error: 'device_flow_unavailable', detail }`
 - GitHub 侧错误 → 透传其状态码（无法归类时 `502`）+ `{ error, detail }`
 
-#### `GET /api/auth/device?deviceCode=xxx`
+#### `GET /api/auth/device?deviceCode=xxx&interval=5`
+参数：`deviceCode`（必填，长度 8~255）、`interval`（可选，整数 1~60，默认 5）——`interval` 是**调用方当前使用的轮询间隔**，
+用于 `slow_down` 递增（见下）。参数校验走 `devicePollSchema`（`src/lib/validation.ts`）。
+
 轮询一次授权状态。**除参数错误外一律 200**，客户端按 `state` 分发：
 ```ts
 { state: 'pending' }
@@ -558,9 +563,14 @@ export interface ApiError { error: string; detail?: string; }
 ```
 - `success` 时服务端先 `validateToken()` 再落库（`app_settings.github_token`）并 `resetTokenCaches()`，响应只含掩码
 - `deviceCode` 缺失或长度非法 → `400 { error: 'invalid_body', detail }`
+- `interval` 非 1~60 的整数 → `400 { error: 'invalid_body', detail }`（中文说明）
 
-客户端轮询约定（`TokenPanel`）：按 `interval` 秒轮询；`pending` 继续等待；`slow_down` 用返回的新 `interval` 继续；
-倒计时（`expiresIn`）归零即判定过期；取消或组件卸载必须清理定时器（`setInterval` / `setTimeout`）并 abort 在途请求。
+`slow_down` 的新间隔 = `min(60, max(1, floor(interval ?? 5) + 5))`，若 GitHub 响应体自带更大的 `interval` 则取二者最大值后同样 clamp 到 **60 秒上限**。
+GitHub 的 `slow_down` 响应体通常**不带** `interval`，所以调用方必须每次回传当前间隔，否则不会真正递增（10 → 15 → 20 …）。
+
+客户端轮询约定（`TokenPanel`）：按 `interval` 秒轮询并把当前 `interval` 一起作为查询参数回传；`pending` 继续等待；
+`slow_down` 用返回的新 `interval` 覆盖本地值后继续；倒计时（`expiresIn`）归零即判定过期；
+取消或组件卸载必须清理定时器（`setInterval` / `setTimeout`）并 abort 在途请求。
 
 ## 7. 设计令牌（`globals.css`，WP4 落地；其他 WP 只使用类名与 CSS 变量）
 

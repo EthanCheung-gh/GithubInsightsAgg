@@ -15,18 +15,19 @@ Collect the metrics scattered across GitHub's per-repository Insights pages (tra
 
 1. [Overview](#1-overview)
 2. [Features](#2-features)
-3. [Quick start](#3-quick-start)
-4. [GitHub token configuration](#4-github-token-configuration)
-5. [Scripts](#5-scripts)
-6. [Pages](#6-pages)
-7. [HTTP API](#7-http-api)
-8. [Data collection matrix](#8-data-collection-matrix)
-9. [Metric definitions](#9-metric-definitions)
-10. [Architecture](#10-architecture)
-11. [Scheduled collection](#11-scheduled-collection)
-12. [Known limitations](#12-known-limitations)
-13. [Tech stack](#13-tech-stack)
-14. [License](#license)
+3. [Screenshots](#3-screenshots)
+4. [Quick start](#4-quick-start)
+5. [GitHub token configuration](#5-github-token-configuration)
+6. [Scripts](#6-scripts)
+7. [Pages](#7-pages)
+8. [HTTP API](#8-http-api)
+9. [Data collection matrix](#9-data-collection-matrix)
+10. [Metric definitions](#10-metric-definitions)
+11. [Architecture](#11-architecture)
+12. [Scheduled collection](#12-scheduled-collection)
+13. [Known limitations](#13-known-limitations)
+14. [Tech stack](#14-tech-stack)
+15. [License](#license)
 
 ## 1. Overview
 
@@ -86,7 +87,47 @@ Data lives in a local SQLite file (`node:sqlite`, no ORM). Pages and API are ser
 - A 0–100 composite of traffic, activity, responsiveness and community health, sortable and comparable.
 - The aggregate view's `overall.healthScore` is the `views`-weighted mean of the per-repo scores.
 
-## 3. Quick start
+## 3. Screenshots
+
+Every screenshot below is a full-page capture of a real running instance (demo data, 30-day window) taken with Playwright at a 1600 px viewport.
+
+### Overview dashboard
+
+Cross-repo KPIs, views / clones and commit trends, repository ranking, language mix and rule-based insights.
+
+![](docs/screenshots/overview.png)
+
+### Repository detail — Overview tab
+
+Stars / forks trend, language mix, release cadence and the community health checklist of a single repository.
+
+![](docs/screenshots/detail-overview.png)
+
+### Repository detail — Traffic tab
+
+Daily views and clones, referrer ranking and popular paths.
+
+![](docs/screenshots/detail-traffic.png)
+
+### Repository detail — Activity tab
+
+Daily commit curve, weekday distribution, weekly additions / deletions and the contributor ranking.
+
+![](docs/screenshots/detail-activity.png)
+
+### Compare
+
+Two to four repositories side by side: metric matrix, views / commits / health-score charts, traffic-aligned trend and comparison insights.
+
+![](docs/screenshots/compare.png)
+
+### Settings and token
+
+Token source and masked value, one-click GitHub authorization (Device Flow), the manual paste entry, plus running status and sync history.
+
+![](docs/screenshots/settings-token.png)
+
+## 4. Quick start
 
 Requires Node.js >= 22.5 (for the built-in `node:sqlite`) and pnpm.
 
@@ -105,11 +146,11 @@ Demo data is generated deterministically (the same repository always yields the 
 
 Note: if you have already run `gh auth login` on this machine, the project picks up that token and runs in `live` mode. Demo repositories are **not** seeded in that case — add a repository on `/repos`, or run `pnpm sync --repo owner/name` to land one first.
 
-## 4. GitHub token configuration
+## 5. GitHub token configuration
 
 There are three ways to give the app a token. Pick one — the recommended order is top to bottom.
 
-### 4.1 In-app one-click authorization (recommended)
+### 5.1 In-app one-click authorization (recommended)
 
 Uses GitHub's OAuth **Device Flow**, so no token is ever copied around.
 
@@ -124,9 +165,9 @@ Uses GitHub's OAuth **Device Flow**, so no token is ever copied around.
    **Only the Client ID is needed — no Client Secret.**
 4. Open `/settings`, click **一键连接 GitHub**, copy the code shown on the page into the GitHub page that opens, and approve. The token is validated, stored locally and used immediately — no restart.
 
-If `GITHUB_OAUTH_CLIENT_ID` is empty the settings page hides the button and falls back to 4.2.
+If `GITHUB_OAUTH_CLIENT_ID` is empty the settings page hides the button and falls back to 5.2.
 
-### 4.2 In-app manual paste
+### 5.2 In-app manual paste
 
 On `/settings` click **去 GitHub 创建 Token**: the link is prefilled with the `repo` and `read:org` scopes (do not narrow them — without `repo` the traffic endpoints are off limits). Paste the token into the password field and save; it is verified with `GET /user`, stored in the local database and picked up immediately.
 
@@ -135,7 +176,7 @@ Supported token types:
 - **Fine-grained PAT**: select the repositories to collect; grant at least `Metadata: Read-only`, `Contents: Read-only`, `Issues: Read-only`, `Pull requests: Read-only`. Traffic additionally needs `Administration: Read-only` (the traffic endpoints require push access to that repository).
 - **Classic PAT**: tick `repo` (includes private repositories) or `public_repo` (public repositories only).
 
-### 4.3 Environment variable / gh CLI
+### 5.3 Environment variable / gh CLI
 
 The classic path, best suited to CI and containers — put it in `.env`:
 
@@ -153,7 +194,7 @@ The resolution order is fixed: `GITHUB_TOKEN` → `GH_TOKEN` → token saved in 
 
 Collection throttling is configurable: `GITHUB_MIN_INTERVAL_MS` (default 80 ms).
 
-## 5. Scripts
+## 6. Scripts
 
 | Command | Purpose | Example |
 | --- | --- | --- |
@@ -194,7 +235,7 @@ Exit codes: `0` = everything succeeded or partially succeeded; `1` = at least on
 
 Each check prints `PASS` / `FAIL` / `SKIP`, a failure does not abort the run, and the run ends with `smoke: N passed, M failed, K skipped`. Any FAIL makes the exit code 1.
 
-## 6. Pages
+## 7. Pages
 
 | Path | Purpose |
 | --- | --- |
@@ -204,7 +245,7 @@ Each check prints `PASS` / `FAIL` / `SKIP`, a failure does not abort the run, an
 | `/compare` | Multi-repo comparison: pick 2–4 repositories to get a metric matrix, views / commits / health-score comparison, traffic-aligned trend and comparison insights; shows an empty state when there are too few repositories |
 | `/settings` | Configuration and diagnostics: GitHub token panel (one-click device-flow authorization, manual token paste, clear token), token source and current mode, database path, the last 20 sync runs, an explanation of collection scope, and "re-sync all" |
 
-## 7. HTTP API
+## 8. HTTP API
 
 Convention: success is `200` with JSON (`POST /api/repos` returns `201` when it creates a repository); bad input is `400`; a missing resource is `404`; a conflict is `409`; a server error is `500` with a `{ error, detail? }` body.
 
@@ -227,7 +268,7 @@ Convention: success is `200` with JSON (`POST /api/repos` returns `201` when it 
 
 Those 14 "method + path" combinations map to 8 route files; field definitions are in section 6 of `docs/CONTRACTS.md`.
 
-## 8. Data collection matrix
+## 9. Data collection matrix
 
 | Insights module | GitHub endpoint | Table | Requests |
 | --- | --- | --- | --- |
@@ -246,7 +287,7 @@ Those 14 "method + path" combinations map to 8 route files; field definitions ar
 
 A full sync of one repository issues 14 requests (12 REST calls plus 2 GraphQL queries); the REST 5000/h quota therefore covers roughly 400 full syncs.
 
-## 9. Metric definitions
+## 10. Metric definitions
 
 Dates are always exposed as `YYYY-MM-DD` (UTC); every ratio is a `0–1` fraction and percentage formatting happens only in the UI.
 
@@ -272,7 +313,7 @@ healthScore = round(0.30*traffic + 0.30*activity + 0.20*responsiveness + 0.20*co
 
 `avgCloseHours` is treated as 168 hours when it cannot be obtained, so the responsiveness term is an estimate. The aggregate view's `overall.healthScore` is the `views`-weighted mean of the per-repo scores (arithmetic mean when every `views` is 0).
 
-## 10. Architecture
+## 11. Architecture
 
 ```text
 GithubInsightsAgg/
@@ -307,7 +348,7 @@ GitHub REST v3 / GraphQL v4
 
 Demo mode is not "substitute data at read time": the synthetic rows are written into the same tables during sync, so the read layer, the metrics and the pages all share one code path. `mode` only drives the response marker and the UI hint.
 
-## 11. Scheduled collection
+## 12. Scheduled collection
 
 The project ships no scheduler; call `pnpm sync` from system cron:
 
@@ -324,7 +365,7 @@ Notes:
 - For machine parsing use `pnpm sync --all --json`, which prints a single JSON object.
 - Once a day is enough: the traffic window is only 14 days, so daily syncs never lose data while staying cheap on quota.
 
-## 12. Known limitations
+## 13. Known limitations
 
 - **Traffic covers only 14 days**: GitHub exposes just the last 14 days, so history accumulates through daily syncs; the first run cannot show anything older.
 - **Traffic needs push access**: a read-only token cannot collect views / clones for someone else's repository, and that run is marked "partial".
@@ -339,7 +380,7 @@ Notes:
 - **No AI summaries**: insights come entirely from the rule engine; model-generated summaries are future work (the extension point exists).
 - **Open Issues definition**: the GraphQL `issues(states: OPEN){ totalCount }` count (excluding PRs) is preferred; when GraphQL is unavailable it falls back to REST's `open_issues_count`, which includes PRs and therefore reads high.
 
-## 13. Tech stack
+## 14. Tech stack
 
 | Layer | Choice |
 | --- | --- |

@@ -209,12 +209,26 @@ export const tokenSetSchema: z.ZodType<{ token: string }> = z.object({
     }),
 });
 
-/** 设备码轮询：长度 8~255。 */
-export const devicePollSchema: z.ZodType<{ deviceCode: string }> = z.object({
+/** `slow_down` 递增用的轮询间隔允许范围（秒）。 */
+export const MIN_DEVICE_INTERVAL = 1;
+export const MAX_DEVICE_INTERVAL = 60;
+const DEVICE_INTERVAL_MESSAGE = `interval 必须是 ${MIN_DEVICE_INTERVAL}~${MAX_DEVICE_INTERVAL} 的整数`;
+
+/** 设备码轮询：`deviceCode` 长度 8~255；`interval` 可选，1~60 的整数（用于 `slow_down` 递增）。 */
+export const devicePollSchema: z.ZodType<{ deviceCode: string; interval?: number }> = z.object({
   deviceCode: z
     .string({ error: 'deviceCode 必须是字符串' })
     .min(8, { error: 'deviceCode 长度必须是 8~255' })
     .max(255, { error: 'deviceCode 长度必须是 8~255' }),
+  interval: z.preprocess(
+    emptyToUndefined,
+    z.coerce
+      .number({ error: DEVICE_INTERVAL_MESSAGE })
+      .int({ error: DEVICE_INTERVAL_MESSAGE })
+      .min(MIN_DEVICE_INTERVAL, { error: DEVICE_INTERVAL_MESSAGE })
+      .max(MAX_DEVICE_INTERVAL, { error: DEVICE_INTERVAL_MESSAGE })
+      .optional(),
+  ),
 });
 
 /**

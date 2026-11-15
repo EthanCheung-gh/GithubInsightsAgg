@@ -14,7 +14,7 @@ import { deviceFlowAvailable } from '@/lib/github';
 import { getRateLimitInfo, resolveToken } from '@/lib/github/client';
 import type { TokenSource } from '@/lib/github/types';
 import { countRepos, lastSyncedAt } from '@/lib/repo-store';
-import { maskToken } from '@/lib/settings-store';
+import { getStoredToken, maskToken } from '@/lib/settings-store';
 import { listSyncRuns } from '@/lib/sync-store';
 import { effectiveMode } from '@/lib/sync';
 
@@ -72,12 +72,22 @@ export default async function SettingsPage() {
           ? '已配置（gh CLI）'
           : '未配置';
 
+  // 「清除应用内 Token」只看本地是否存过 Token，与当前生效来源无关：
+  // env 与 stored 并存时 `source` 是 env，但本地那一行依然可以被清掉。
+  // 与 `GET /api/auth/token` 的 `canClear` 同一口径；读取失败（DB 异常）时降级为 false。
+  let canClearStoredToken: boolean;
+  try {
+    canClearStoredToken = getStoredToken() !== null;
+  } catch {
+    canClearStoredToken = false;
+  }
+
   const tokenInitial = {
     configured: token.token !== null,
     source: token.source,
     sourceLabel: TOKEN_SOURCE_LABEL[token.source],
     maskedToken: token.token ? maskToken(token.token) : null,
-    canClear: token.source === 'stored',
+    canClear: canClearStoredToken,
     deviceFlowAvailable: deviceFlowAvailable(),
     createTokenUrl: TOKEN_CREATE_URL,
     settingUrl: TOKEN_SETTING_URL,

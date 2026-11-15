@@ -56,7 +56,11 @@ export function KpiCard({
       {icon ? (
         <div
           className={cn(
-            'flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px]',
+            // 图标贴住卡片右上角：`self-start` + 固定 32px 尺寸让它始终锚在内容区顶部，
+            // 值换行 / 有 hint / 有 delta 都不会把图标拉向底部；
+            // `-mt-2` 把 32px 图标块的中心对到 11px label 行的文本中心（正中偏上 8px），
+            // 否则图标底边会压到数值那一行，看起来像「掉下去」了。
+            '-mt-2 flex h-8 w-8 shrink-0 items-center justify-center self-start rounded-[8px]',
             TONE_CHIP[tone],
           )}
         >

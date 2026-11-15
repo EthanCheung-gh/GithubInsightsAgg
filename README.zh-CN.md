@@ -15,18 +15,19 @@
 
 1. [项目简介](#1-项目简介)
 2. [功能特性](#2-功能特性)
-3. [快速开始](#3-快速开始)
-4. [配置 GitHub Token](#4-配置-github-token)
-5. [脚本](#5-脚本)
-6. [页面导览](#6-页面导览)
-7. [HTTP API](#7-http-api)
-8. [数据采集矩阵](#8-数据采集矩阵)
-9. [指标口径](#9-指标口径)
-10. [架构说明](#10-架构说明)
-11. [定时采集](#11-定时采集)
-12. [已知限制](#12-已知限制)
-13. [技术栈](#13-技术栈)
-14. [许可证](#14-许可证)
+3. [界面预览](#3-界面预览)
+4. [快速开始](#4-快速开始)
+5. [配置 GitHub Token](#5-配置-github-token)
+6. [脚本](#6-脚本)
+7. [页面导览](#7-页面导览)
+8. [HTTP API](#8-http-api)
+9. [数据采集矩阵](#9-数据采集矩阵)
+10. [指标口径](#10-指标口径)
+11. [架构说明](#11-架构说明)
+12. [定时采集](#12-定时采集)
+13. [已知限制](#13-已知限制)
+14. [技术栈](#14-技术栈)
+15. [许可证](#15-许可证)
 
 ## 1. 项目简介
 
@@ -83,7 +84,47 @@ GithubInsightsAgg 是一个**自建、单进程、单用户**的 GitHub 数据�
 - 0~100 复合评分，由流量、活跃度、响应度、社区健康四部分加权得出，可排序、可对比。
 - 聚合视图的 `overall.healthScore` 按各仓库 `views` 加权平均。
 
-## 3. 快速开始
+## 3. 界面预览
+
+以下截图均来自真实运行的实例（演示数据、30 天区间），由 Playwright 在 1600 px 视口下整页截取。
+
+### 总览
+
+跨仓库 KPI、访问量 / 克隆量与提交趋势、仓库排行榜、语言构成与规则化洞察。
+
+![](docs/screenshots/overview.png)
+
+### 仓库详情 · 概览
+
+单个仓库的 Stars / Forks 趋势、语言构成、Release 节奏与社区健康清单。
+
+![](docs/screenshots/detail-overview.png)
+
+### 仓库详情 · 流量
+
+逐日访问量与克隆量、来源排行与热门页面。
+
+![](docs/screenshots/detail-traffic.png)
+
+### 仓库详情 · 活跃度
+
+逐日提交曲线、星期分布、每周新增 / 删除行与贡献者排行。
+
+![](docs/screenshots/detail-activity.png)
+
+### 多仓库对比
+
+2~4 个仓库横向对比：指标矩阵、访问量 / 提交数 / 健康度对比图、流量对齐趋势与对比洞察。
+
+![](docs/screenshots/compare.png)
+
+### 设置与 Token
+
+Token 来源与脱敏值、一键连接 GitHub（Device Flow）、手动填写入口，以及运行状态与同步记录诊断。
+
+![](docs/screenshots/settings-token.png)
+
+## 4. 快速开始
 
 要求 Node.js >= 22.5（使用内置 `node:sqlite`），并已安装 pnpm。
 
@@ -102,11 +143,11 @@ pnpm dev        # http://localhost:3000
 
 注意：如果本机已经用 `gh auth login` 登录过，项目会自动沿用 `gh` 的 Token 进入 `live` 模式，此时**不会**自举演示仓库，需要到 `/repos` 页添加仓库，或执行 `pnpm sync --repo owner/name` 先落一个仓库。
 
-## 4. 配置 GitHub Token
+## 5. 配置 GitHub Token
 
 三种方式任选其一，推荐顺序自上而下。
 
-### 4.1 应用内一键授权（推荐）
+### 5.1 应用内一键授权（推荐）
 
 走 GitHub OAuth **Device Flow**，全程不需要复制 Token。
 
@@ -121,9 +162,9 @@ pnpm dev        # http://localhost:3000
    **只需 Client ID，不需要 Client Secret。**
 4. 打开 `/settings`，点击「一键连接 GitHub」，把页面上的验证码填到自动打开的 GitHub 页面并同意授权。Token 会被校验、落库并立即生效，无需重启。
 
-未配置 `GITHUB_OAUTH_CLIENT_ID` 时设置页会隐藏该按钮，自动降级为 4.2。
+未配置 `GITHUB_OAUTH_CLIENT_ID` 时设置页会隐藏该按钮，自动降级为 5.2。
 
-### 4.2 应用内手动粘贴
+### 5.2 应用内手动粘贴
 
 在 `/settings` 点击「去 GitHub 创建 Token」：链接已预填 `repo` 与 `read:org` 权限（不要改小，缺少 `repo` 就读不到 Traffic）。把 Token 粘贴到密码框并保存，系统会用 `GET /user` 校验、写入本地库并立即使用。
 
@@ -132,7 +173,7 @@ pnpm dev        # http://localhost:3000
 - **fine-grained PAT**：选中要采集的仓库，至少给 `Metadata: Read-only`、`Contents: Read-only`、`Issues: Read-only`、`Pull requests: Read-only`；要读 Traffic 还需给 `Administration: Read-only`（Traffic 接口要求对该仓库有 push 权限）。
 - **classic PAT**：勾选 `repo`（含私有仓库）或 `public_repo`（仅公开仓库）。
 
-### 4.3 环境变量 / gh CLI
+### 5.3 环境变量 / gh CLI
 
 传统方式，适合 CI 与容器，在 `.env` 里填写：
 
@@ -150,7 +191,7 @@ GITHUB_TOKEN="ghp_xxx"
 
 采集节流可调：`GITHUB_MIN_INTERVAL_MS`（默认 80ms）。
 
-## 5. 脚本
+## 6. 脚本
 
 | 命令 | 用途 | 示例 |
 | --- | --- | --- |
@@ -191,7 +232,7 @@ GITHUB_TOKEN="ghp_xxx"
 
 每项打印 `PASS` / `FAIL` / `SKIP`，失败不中断，最后输出 `smoke: N passed, M failed, K skipped`。存在 FAIL 时退出码为 1。
 
-## 6. 页面导览
+## 7. 页面导览
 
 | 路径 | 作用 |
 | --- | --- |
@@ -201,7 +242,7 @@ GITHUB_TOKEN="ghp_xxx"
 | `/compare` | 多仓对比：选择 2~4 个仓库，给出指标矩阵、访问量 / 提交数 / 健康度对比、流量对齐趋势与对比洞察；仓库不足时给出空态提示 |
 | `/settings` | 配置与诊断：GitHub Token 面板（一键 Device Flow 授权、手动粘贴、清除 Token）、Token 来源与当前模式、数据库路径、最近 20 次同步记录、采集范围说明、重新同步全部仓库 |
 
-## 7. HTTP API
+## 8. HTTP API
 
 统一约定：成功 `200` + JSON（`POST /api/repos` 新建仓库返回 `201`）；参数错误 `400`；资源不存在 `404`；冲突 `409`；服务端异常 `500` 且响应体为 `{ error, detail? }`。
 
@@ -224,7 +265,7 @@ GITHUB_TOKEN="ghp_xxx"
 
 以上 14 个「方法 + 路径」组合对应 8 条路由，字段定义见 `docs/CONTRACTS.md` 第 6 节。
 
-## 8. 数据采集矩阵
+## 9. 数据采集矩阵
 
 | Insights 模块 | GitHub 接口 | 落库表 | 配额 |
 | --- | --- | --- | --- |
@@ -243,7 +284,7 @@ GITHUB_TOKEN="ghp_xxx"
 
 单仓每次全量同步共 14 次请求（12 次 REST + 2 次 GraphQL）；REST 的 5000/h 配额可覆盖约 400 次全量同步。
 
-## 9. 指标口径
+## 10. 指标口径
 
 所有日期对外统一为 `YYYY-MM-DD`（UTC），所有比例字段为 `0~1` 的小数，百分比格式化只在前端做。
 
@@ -269,7 +310,7 @@ healthScore = round(0.30*traffic + 0.30*activity + 0.20*responsiveness + 0.20*co
 
 其中 `avgCloseHours` 无法获得时按 168 处理；聚合视图的 `overall.healthScore` 为各仓库 `healthScore` 按 `views` 加权平均（全部 `views` 为 0 时取算术平均）。
 
-## 10. 架构说明
+## 11. 架构说明
 
 ```text
 GithubInsightsAgg/
@@ -304,7 +345,7 @@ GitHub REST v3 / GraphQL v4
 
 演示模式不是「读取时替换数据」：同步阶段就把合成数据写进同一批表，因此读库、指标、页面三条链路完全共用一套代码，`mode` 只用于响应标记与 UI 提示。
 
-## 11. 定时采集
+## 12. 定时采集
 
 项目不自带调度器，用系统 cron 调用 `pnpm sync` 即可：
 
@@ -321,7 +362,7 @@ GitHub REST v3 / GraphQL v4
 - 想让日志更适合机器解析时改用 `pnpm sync --all --json`，输出为单个 JSON 对象。
 - 采集频率建议每天 1 次：Traffic 只有 14 天窗口，日更足以保证不丢数据，同时节省配额。
 
-## 12. 已知限制
+## 13. 已知限制
 
 - **Traffic 仅 14 天**：GitHub 只提供最近 14 天明细，历史靠每日同步累积，首次使用看不到更早的数据。
 - **Traffic 需要 push 权限**：只读 Token 无法采集他人仓库的 views / clones，本次同步会标记为「部分成功」。
@@ -336,7 +377,7 @@ GitHub REST v3 / GraphQL v4
 - **无 AI 摘要**：洞察全部来自规则引擎，二期才考虑模型摘要（接口位置已预留）。
 - **Open Issues 口径**：优先用 GraphQL `issues(states: OPEN){ totalCount }`（不含 PR）；GraphQL 不可用时回退 REST 的 `open_issues_count`（含 PR，会偏大）。
 
-## 13. 技术栈
+## 14. 技术栈
 
 | 层 | 选型 |
 | --- | --- |
@@ -347,6 +388,6 @@ GitHub REST v3 / GraphQL v4
 | 数据源 | GitHub REST v3（Traffic / stats）+ GraphQL v4（Issues / PR / watchers） |
 | 包管理 | pnpm |
 
-## 14. 许可证
+## 15. 许可证
 
 MIT，见 [LICENSE](LICENSE)。

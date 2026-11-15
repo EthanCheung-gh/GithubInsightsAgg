@@ -193,6 +193,7 @@ export function TokenPanel({ initial }: { initial: TokenPanelInitial }) {
   /** 按 `interval` 秒轮询 `GET /api/auth/device`，按 `state` 分发。 */
   const runPollLoop = useCallback(
     async (current: DeviceStartResponse, runId: number) => {
+      /** 本轮轮询当前使用的间隔（秒）；`slow_down` 时用服务端返回值覆盖。 */
       let intervalSeconds =
         Number.isFinite(current.interval) && current.interval > 0
           ? current.interval
@@ -210,8 +211,10 @@ export function TokenPanel({ initial }: { initial: TokenPanelInitial }) {
 
         let payload: DevicePollResponse;
         try {
+          // 把当前间隔回传给服务端：GitHub 的 slow_down 响应体不带 interval，
+          // 只有带上当前值服务端才能返回递增后的新间隔（10 → 15 → 20 …）。
           payload = await fetchJson<DevicePollResponse>(
-            `/api/auth/device?deviceCode=${encodeURIComponent(current.deviceCode)}`,
+            `/api/auth/device?deviceCode=${encodeURIComponent(current.deviceCode)}&interval=${encodeURIComponent(String(intervalSeconds))}`,
             { signal: controller.signal },
           );
         } catch (error) {
@@ -229,6 +232,7 @@ export function TokenPanel({ initial }: { initial: TokenPanelInitial }) {
         if (payload.state === 'pending') continue;
 
         if (payload.state === 'slow_down') {
+          // 用服务端返回的新间隔覆盖本地值，后续轮询按新间隔等待（下一次请求会把新值回传）。
           intervalSeconds =
             Number.isFinite(payload.interval) && payload.interval > 0
               ? payload.interval
@@ -394,7 +398,7 @@ export function TokenPanel({ initial }: { initial: TokenPanelInitial }) {
             value={manualToken}
             onChange={(event) => setManualToken(event.target.value)}
             placeholder="ghp_…"
-            aria-label="GitHub Token"
+            aria-label="手动填写的 Token"
             autoComplete="off"
             spellCheck={false}
             disabled={savingManual}
@@ -420,7 +424,7 @@ export function TokenPanel({ initial }: { initial: TokenPanelInitial }) {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <KeyRound size={14} className="text-muted" />
-          <span className="text-[13px] font-medium text-text">GitHub Token</span>
+          <span className="text-[13px] font-medium text-text">当前 Token</span>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {initial.maskedToken !== null ? (
@@ -547,13 +551,10 @@ export function TokenPanel({ initial }: { initial: TokenPanelInitial }) {
         </section>
       )}
 
-      {/* 4. 清除按钮 / 环境变量说明 */}
-      {initial.source === 'env' ? (
-        <p className="text-[12px] leading-relaxed text-muted">
-          当前 Token 来自环境变量，需修改{' '}
-          <code className="tabular text-text">GITHUB_TOKEN</code> 后重启服务。
-        </p>
-      ) : initial.canClear ? (
+      {/* 4. 清除按钮 / 环境变量说明
+          两者互不排斥：`canClear` 只看本地是否存过 Token，
+          所以「env 与 stored 并存」时清除按钮与环境变量提示会同时出现。 */}
+      {initial.canClear ? (
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="danger" size="sm" onClick={handleClearStoredToken} loading={clearing}>
             {clearing ? null : <Trash2 size={12} />}
@@ -563,6 +564,13 @@ export function TokenPanel({ initial }: { initial: TokenPanelInitial }) {
             <span className="text-[11px] leading-relaxed text-danger">{clearError}</span>
           ) : null}
         </div>
+      ) : null}
+
+      {initial.source === 'env' ? (
+        <p className="text-[12px] leading-relaxed text-muted">
+          当前 Token 来自环境变量，需修改{' '}
+          <code className="tabular text-text">GITHUB_TOKEN</code> 后重启服务。
+        </p>
       ) : null}
 
       {/* 5. 未启用 Device Flow 时的说明 */}
